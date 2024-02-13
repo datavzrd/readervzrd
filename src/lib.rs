@@ -1,0 +1,230 @@
+use csv::ReaderBuilder;
+use serde_json::{Deserializer, Value};
+use std::fs::File;
+use std::io::{self, BufReader};
+use thiserror::Error;
+
+enum FileFormat {
+    Csv,
+    Json,
+}
+
+impl FileFormat {
+    pub fn from_file(file_path: &str) -> Result<FileFormat, FileError> {
+        match std::path::Path::new(file_path)
+            .extension()
+            .unwrap()
+            .to_str()
+        {
+            Some("csv" | "tsv") => Ok(FileFormat::Csv),
+            Some("json") => Ok(FileFormat::Json),
+            _ => Err(FileError::UnknownFileFormat),
+        }
+    }
+}
+
+pub struct FileReader {
+    file_format: FileFormat,
+    file: BufReader<File>,
+}
+
+impl FileReader {
+    pub fn new(file_path: &str) -> Result<FileReader, FileError> {
+        let file_format = FileFormat::from_file(file_path)?;
+        let file = BufReader::new(File::open(file_path)?);
+        Ok(FileReader {
+            file_format,
+            file,
+        })
+    }
+
+    pub fn headers(&mut self) -> Result<Vec<String>, FileError> {
+        match &self.file_format {
+            FileFormat::Csv => self.read_csv_headers(),
+            FileFormat::Json => self.read_json_headers(),
+        }
+    }
+
+    fn read_csv_headers(&mut self) -> Result<Vec<String>, FileError> {
+        let mut reader = csv::Reader::from_reader(&mut self.file);
+        Ok(reader
+            .headers()
+            .unwrap()
+            .iter()
+            .map(|s| s.to_string())
+            .collect())
+    }
+
+    fn read_json_headers(&mut self) -> Result<Vec<String>, FileError> {
+        let mut headers = Vec::new();
+        // Parse the JSON array at the outermost level
+        if let Ok(value) = serde_json::from_reader(&mut self.file) {
+            if let serde_json::Value::Array(array) = value {
+                // Iterate over the array and collect headers from each object
+                for item in array {
+                    if let serde_json::Value::Object(obj) = item {
+                        flatten_json_object(&mut headers, &obj, String::new());
+                    }
+                }
+            }
+        }
+        Ok(headers)
+    }
+
+    pub fn records(&mut self) -> Result<FlexRecordIter, FileError> {
+        match &self.file_format {
+            FileFormat::Csv => Ok(FlexRecordIter::Csv(Box::new(self.read_csv_records()))),
+            FileFormat::Json => Ok(FlexRecordIter::Json(Box::new(self.read_json_records()?))),
+        }
+    }
+
+
+    fn read_csv_records<'a>(&'a mut self) -> impl Iterator<Item = Vec<String>> + 'a {
+        let reader = ReaderBuilder::new().from_reader(&mut self.file);
+        reader.into_records().filter_map(Result::ok).map(|record| {
+            record.iter().map(|field| field.to_string()).collect()
+        })
+    }
+
+    pub fn read_json_records<'a>(&'a mut self) -> Result<impl Iterator<Item = Vec<String>> + 'a, FileError> {
+        let deserializer = Deserializer::from_reader(&mut self.file).into_iter::<Value>();
+        let iter = deserializer
+            .filter_map(Result::ok)
+            .flat_map(|value| {
+                match value {
+                    Value::Array(arr) => arr.into_iter().map(flatten_json_record),
+                    _ => unreachable!("Expected JSON array"),
+                }
+            });
+        Ok(iter)
+    }
+}
+
+enum FlexRecordIter<'a> {
+    Csv(Box<dyn Iterator<Item = Vec<String>> + 'a>),
+    Json(Box<dyn Iterator<Item = Vec<String>> + 'a>),
+}
+
+impl<'a> Iterator for FlexRecordIter<'a> {
+    type Item = Vec<String>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            FlexRecordIter::Csv(iter) => iter.next(),
+            FlexRecordIter::Json(iter) => iter.next(),
+        }
+    }
+}
+
+fn flatten_json_record(value: Value) -> Vec<String> {
+    match value {
+        Value::String(s) => vec![s],
+        Value::Number(n) => vec![n.to_string()],
+        Value::Array(_) => vec![],
+        Value::Object(obj) => obj
+            .into_iter()
+            .flat_map(|(_, v)| flatten_json_record(v))
+            .collect(),
+        _ => unreachable!("Unexpected value type"),
+    }
+}
+
+fn flatten_json_object(
+    headers: &mut Vec<String>,
+    obj: &serde_json::Map<String, Value>,
+    prefix: String,
+) {
+    for (key, value) in obj {
+        match value {
+            Value::Object(inner_obj) => {
+                let new_prefix = if prefix.is_empty() {
+                    key.to_string()
+                } else {
+                    format!("{}.{}", prefix, key)
+                };
+                flatten_json_object(headers, inner_obj, new_prefix);
+            }
+            _ => {
+                let header = if prefix.is_empty() {
+                    key.to_string()
+                } else {
+                    format!("{}.{}", prefix, key)
+                };
+                if !headers.contains(&header) {
+                    headers.push(header);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum FileError {
+    #[error("Unknown file format")]
+    UnknownFileFormat,
+    #[error("Invalid JSON structure")]
+    InvalidJsonStructure,
+    #[error("IO error: {0}")]
+    IoError(#[from] io::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_csv_headers() {
+        let mut reader = FileReader::new("tests/test.csv").expect("Failed to create FileReader");
+        let headers = reader.headers().expect("Failed to get headers");
+        assert_eq!(headers, vec!["Name", "Age", "Country"]);
+    }
+
+    #[test]
+    fn test_json_headers() {
+        let mut reader = FileReader::new("tests/test.json").expect("Failed to create FileReader");
+        let headers = reader.headers().expect("Failed to get headers");
+        assert_eq!(headers, vec!["age", "country", "name"]);
+    }
+
+    #[test]
+    fn test_nested_json_headers() {
+        let mut reader =
+            FileReader::new("tests/nested_test.json").expect("Failed to create FileReader");
+        let headers = reader.headers().expect("Failed to get headers");
+        assert_eq!(
+            headers,
+            vec!["age", "bank.account", "bank.institution", "country", "name"]
+        );
+    }
+
+    #[test]
+    fn test_csv_records() {
+        let mut reader = FileReader::new("tests/test.csv").expect("Failed to create FileReader");
+        let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0], vec!["John", "30", "USA"]);
+        assert_eq!(records[1], vec!["Alice", "25", "UK"]);
+        assert_eq!(records[2], vec!["Bob", "40", "Canada"]);
+    }
+
+    #[test]
+    fn test_json_records() {
+        let mut reader = FileReader::new("tests/test.json").expect("Failed to create FileReader");
+        let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0], vec!["30", "USA", "John"]);
+        assert_eq!(records[1], vec!["25", "UK", "Alice"]);
+        assert_eq!(records[2], vec!["40", "Canada", "Bob"]);
+    }
+
+    #[test]
+    fn test_nested_json_records() {
+        let mut reader =
+            FileReader::new("tests/nested_test.json").expect("Failed to create FileReader");
+        let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0], vec!["30", "123456", "Chase", "USA", "John"]);
+        assert_eq!(records[1], vec!["25", "654321", "Barclays", "UK", "Alice"]);
+        assert_eq!(records[2], vec!["40", "789456", "TD", "Canada", "Bob"]);
+    }
+}

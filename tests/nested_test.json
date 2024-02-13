@@ -1,0 +1,29 @@
+[
+    {
+        "name": "John",
+        "age": 30,
+        "country": "USA",
+        "bank": {
+          "institution": "Chase",
+            "account": "123456"
+        }
+    },
+    {
+        "name": "Alice",
+        "age": 25,
+        "country": "UK",
+        "bank": {
+          "institution": "Barclays",
+            "account": "654321"
+        }
+    },
+    {
+        "name": "Bob",
+        "age": 40,
+        "country": "Canada",
+        "bank": {
+          "institution": "TD",
+            "account": "789456"
+        }
+    }
+]
