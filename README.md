@@ -27,6 +27,9 @@ fn main() -> Result<(), FileError> {
     // Create a FileReader for a CSV file with ',' delimiter
     let mut reader = FileReader::new("data.csv", Some(','))?;
 
+    // Create another FileReader for a JSON file
+    let mut another_reader = FileReader::new("data.json", None)?;
+
     // Get headers from the file
     let headers = reader.headers()?;
     println!("Headers: {:?}", headers);
