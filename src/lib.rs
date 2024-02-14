@@ -275,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn te_json_records_with_mixed_key_order() {
+    fn test_json_records_with_mixed_key_order() {
         let mut reader = FileReader::new("tests/mixed_key_order_test.json", None).expect("Failed to create FileReader");
         let records: Vec<Vec<String>> = reader.records().unwrap().collect();
         assert_eq!(records.len(), 3);
