@@ -93,7 +93,7 @@ impl FileReader {
             .flat_map(|value| {
                 match value {
                     Value::Array(arr) => arr.into_iter().map(flatten_json_record),
-                    _ => unreachable!("Expected JSON array"),
+                    _ => panic!("Expected JSON array"),
                 }
             });
         Ok(iter)
