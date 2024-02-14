@@ -266,4 +266,11 @@ mod tests {
         assert_eq!(records[1], vec!["25", "UK", "Alice", "[\"rabbit\"]"]);
         assert_eq!(records[2], vec!["40", "Canada", "Bob", "[]"]);
     }
+
+    #[test]
+    fn test_json_headers_with_inner_array() {
+        let mut reader = FileReader::new("tests/inner_array_test.json", None).expect("Failed to create FileReader");
+        let headers = reader.headers().expect("Failed to get headers");
+        assert_eq!(headers, vec!["age", "country", "name", "pets"]);
+    }
 }
