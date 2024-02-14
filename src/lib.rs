@@ -1,4 +1,3 @@
-use csv::ReaderBuilder;
 use serde_json::{Deserializer, Value};
 use std::fs::File;
 use std::io::{self, BufReader};
