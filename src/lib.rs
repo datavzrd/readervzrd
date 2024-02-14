@@ -5,19 +5,19 @@ use std::io::{self, BufReader};
 use thiserror::Error;
 
 enum FileFormat {
-    Csv,
+    Csv(char),
     Json,
 }
 
 impl FileFormat {
-    pub fn from_file(file_path: &str) -> Result<FileFormat, FileError> {
-        match std::path::Path::new(file_path)
+    pub fn from_file(file_path: &str, delimiter: Option<char>) -> Result<FileFormat, FileError> {
+        match (std::path::Path::new(file_path)
             .extension()
             .unwrap()
-            .to_str()
+            .to_str(), delimiter)
         {
-            Some("csv" | "tsv") => Ok(FileFormat::Csv),
-            Some("json") => Ok(FileFormat::Json),
+            (Some("csv" | "tsv"), Some(d)) => Ok(FileFormat::Csv(d)),
+            (Some("json"), _) => Ok(FileFormat::Json),
             _ => Err(FileError::UnknownFileFormat),
         }
     }
@@ -29,8 +29,8 @@ pub struct FileReader {
 }
 
 impl FileReader {
-    pub fn new(file_path: &str) -> Result<FileReader, FileError> {
-        let file_format = FileFormat::from_file(file_path)?;
+    pub fn new(file_path: &str, delimiter: Option<char>) -> Result<FileReader, FileError> {
+        let file_format = FileFormat::from_file(file_path, delimiter)?;
         let file = BufReader::new(File::open(file_path)?);
         Ok(FileReader {
             file_format,
@@ -40,13 +40,13 @@ impl FileReader {
 
     pub fn headers(&mut self) -> Result<Vec<String>, FileError> {
         match &self.file_format {
-            FileFormat::Csv => self.read_csv_headers(),
+            FileFormat::Csv(delimiter) => self.read_csv_headers(&delimiter.to_owned()),
             FileFormat::Json => self.read_json_headers(),
         }
     }
 
-    fn read_csv_headers(&mut self) -> Result<Vec<String>, FileError> {
-        let mut reader = csv::Reader::from_reader(&mut self.file);
+    fn read_csv_headers(&mut self, delimiter: &char) -> Result<Vec<String>, FileError> {
+        let mut reader = csv::ReaderBuilder::new().delimiter(delimiter.to_owned() as u8).from_reader(&mut self.file);
         Ok(reader
             .headers()
             .unwrap()
@@ -73,14 +73,14 @@ impl FileReader {
 
     pub fn records(&mut self) -> Result<FlexRecordIter, FileError> {
         match &self.file_format {
-            FileFormat::Csv => Ok(FlexRecordIter::Csv(Box::new(self.read_csv_records()))),
+            FileFormat::Csv(delimiter) => Ok(FlexRecordIter::Csv(Box::new(self.read_csv_records(&delimiter.to_owned())))),
             FileFormat::Json => Ok(FlexRecordIter::Json(Box::new(self.read_json_records()?))),
         }
     }
 
 
-    fn read_csv_records<'a>(&'a mut self) -> impl Iterator<Item = Vec<String>> + 'a {
-        let reader = ReaderBuilder::new().from_reader(&mut self.file);
+    fn read_csv_records<'a>(&'a mut self, delimiter: &char) -> impl Iterator<Item = Vec<String>> + 'a {
+        let mut reader = csv::ReaderBuilder::new().delimiter(delimiter.to_owned() as u8).from_reader(&mut self.file);
         reader.into_records().filter_map(Result::ok).map(|record| {
             record.iter().map(|field| field.to_string()).collect()
         })
@@ -174,14 +174,14 @@ mod tests {
 
     #[test]
     fn test_csv_headers() {
-        let mut reader = FileReader::new("tests/test.csv").expect("Failed to create FileReader");
+        let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
         let headers = reader.headers().expect("Failed to get headers");
         assert_eq!(headers, vec!["Name", "Age", "Country"]);
     }
 
     #[test]
     fn test_json_headers() {
-        let mut reader = FileReader::new("tests/test.json").expect("Failed to create FileReader");
+        let mut reader = FileReader::new("tests/test.json", None).expect("Failed to create FileReader");
         let headers = reader.headers().expect("Failed to get headers");
         assert_eq!(headers, vec!["age", "country", "name"]);
     }
@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn test_nested_json_headers() {
         let mut reader =
-            FileReader::new("tests/nested_test.json").expect("Failed to create FileReader");
+            FileReader::new("tests/nested_test.json", Some(',')).expect("Failed to create FileReader");
         let headers = reader.headers().expect("Failed to get headers");
         assert_eq!(
             headers,
@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn test_csv_records() {
-        let mut reader = FileReader::new("tests/test.csv").expect("Failed to create FileReader");
+        let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
         let records: Vec<Vec<String>> = reader.records().unwrap().collect();
         assert_eq!(records.len(), 3);
         assert_eq!(records[0], vec!["John", "30", "USA"]);
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn test_json_records() {
-        let mut reader = FileReader::new("tests/test.json").expect("Failed to create FileReader");
+        let mut reader = FileReader::new("tests/test.json", None).expect("Failed to create FileReader");
         let records: Vec<Vec<String>> = reader.records().unwrap().collect();
         assert_eq!(records.len(), 3);
         assert_eq!(records[0], vec!["30", "USA", "John"]);
@@ -220,11 +220,21 @@ mod tests {
     #[test]
     fn test_nested_json_records() {
         let mut reader =
-            FileReader::new("tests/nested_test.json").expect("Failed to create FileReader");
+            FileReader::new("tests/nested_test.json", None).expect("Failed to create FileReader");
         let records: Vec<Vec<String>> = reader.records().unwrap().collect();
         assert_eq!(records.len(), 3);
         assert_eq!(records[0], vec!["30", "123456", "Chase", "USA", "John"]);
         assert_eq!(records[1], vec!["25", "654321", "Barclays", "UK", "Alice"]);
         assert_eq!(records[2], vec!["40", "789456", "TD", "Canada", "Bob"]);
+    }
+
+    #[test]
+    fn test_tsv_records() {
+        let mut reader = FileReader::new("tests/test.tsv", Some('\t')).expect("Failed to create FileReader");
+        let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0], vec!["John", "30", "USA"]);
+        assert_eq!(records[1], vec!["Alice", "25", "UK"]);
+        assert_eq!(records[2], vec!["Bob", "40", "Canada"]);
     }
 }
