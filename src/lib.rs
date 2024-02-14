@@ -273,4 +273,12 @@ mod tests {
         let headers = reader.headers().expect("Failed to get headers");
         assert_eq!(headers, vec!["age", "country", "name", "pets"]);
     }
+
+    #[test]
+    fn test_partial_eq_file_error() {
+        assert_eq!(FileError::UnknownFileFormat, FileError::UnknownFileFormat);
+        assert_eq!(FileError::InvalidJsonStructure, FileError::InvalidJsonStructure);
+        assert_eq!(FileError::IoError(io::Error::from(io::ErrorKind::NotFound)), FileError::IoError(io::Error::from(io::ErrorKind::NotFound)));
+        assert_ne!(FileError::UnknownFileFormat, FileError::InvalidJsonStructure);
+    }
 }
