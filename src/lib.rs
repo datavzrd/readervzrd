@@ -275,6 +275,16 @@ mod tests {
     }
 
     #[test]
+    fn te_json_records_with_mixed_key_order() {
+        let mut reader = FileReader::new("tests/mixed_key_order_test.json", None).expect("Failed to create FileReader");
+        let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0], vec!["30", "USA", "John"]);
+        assert_eq!(records[1], vec!["25", "UK", "Alice"]);
+        assert_eq!(records[2], vec!["40", "Canada", "Bob"]);
+    }
+
+    #[test]
     fn test_partial_eq_file_error() {
         assert_eq!(FileError::UnknownFileFormat, FileError::UnknownFileFormat);
         assert_eq!(FileError::InvalidJsonStructure, FileError::InvalidJsonStructure);
