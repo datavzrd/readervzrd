@@ -1,0 +1,20 @@
+[
+    {
+        "name": "John",
+        "age": 30,
+        "country": "USA",
+        "pets": ["dog", "cat"]
+    },
+    {
+        "name": "Alice",
+        "age": 25,
+        "country": "UK",
+        "pets": ["rabbit"]
+    },
+    {
+        "name": "Bob",
+        "age": 40,
+        "country": "Canada",
+        "pets": []
+    }
+]

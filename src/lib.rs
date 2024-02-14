@@ -120,7 +120,7 @@ fn flatten_json_record(value: Value) -> Vec<String> {
     match value {
         Value::String(s) => vec![s],
         Value::Number(n) => vec![n.to_string()],
-        Value::Array(_) => vec![],
+        Value::Array(a) => vec![serde_json::to_string(&a).unwrap()],
         Value::Object(obj) => obj
             .into_iter()
             .flat_map(|(_, v)| flatten_json_record(v))
@@ -167,6 +167,19 @@ pub enum FileError {
     #[error("IO error: {0}")]
     IoError(#[from] io::Error),
 }
+
+impl PartialEq for FileError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (FileError::UnknownFileFormat, FileError::UnknownFileFormat) => true,
+            (FileError::InvalidJsonStructure, FileError::InvalidJsonStructure) => true,
+            (FileError::IoError(e1), FileError::IoError(e2)) => e1.kind() == e2.kind(),
+            (_, _) => false,
+        }
+    }
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -236,5 +249,22 @@ mod tests {
         assert_eq!(records[0], vec!["John", "30", "USA"]);
         assert_eq!(records[1], vec!["Alice", "25", "UK"]);
         assert_eq!(records[2], vec!["Bob", "40", "Canada"]);
+    }
+
+    #[test]
+    fn test_unknown_file_format() {
+        let result = FileReader::new("tests/test.txt", None);
+        assert!(result.is_err());
+        assert_eq!(result.err().unwrap(), FileError::UnknownFileFormat);
+    }
+
+    #[test]
+    fn test_json_records_with_inner_array() {
+        let mut reader = FileReader::new("tests/inner_array_test.json", None).expect("Failed to create FileReader");
+        let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0], vec!["30", "USA", "John", "[\"dog\",\"cat\"]"]);
+        assert_eq!(records[1], vec!["25", "UK", "Alice", "[\"rabbit\"]"]);
+        assert_eq!(records[2], vec!["40", "Canada", "Bob", "[]"]);
     }
 }
