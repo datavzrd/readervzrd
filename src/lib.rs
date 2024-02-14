@@ -79,7 +79,7 @@ impl FileReader {
 
 
     fn read_csv_records<'a>(&'a mut self, delimiter: &char) -> impl Iterator<Item = Vec<String>> + 'a {
-        let mut reader = csv::ReaderBuilder::new().delimiter(delimiter.to_owned() as u8).from_reader(&mut self.file);
+        let reader = csv::ReaderBuilder::new().delimiter(delimiter.to_owned() as u8).from_reader(&mut self.file);
         reader.into_records().filter_map(Result::ok).map(|record| {
             record.iter().map(|field| field.to_string()).collect()
         })
@@ -99,7 +99,7 @@ impl FileReader {
     }
 }
 
-enum FlexRecordIter<'a> {
+pub enum FlexRecordIter<'a> {
     Csv(Box<dyn Iterator<Item = Vec<String>> + 'a>),
     Json(Box<dyn Iterator<Item = Vec<String>> + 'a>),
 }
