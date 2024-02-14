@@ -1,6 +1,6 @@
 # readervzrd
 
-Readervzrd is a Rust library that provides utilities for reading and parsing data from CSV and JSON files. It offers flexible functionality to extract headers and iterate over records, supporting different file formats and structures.
+Readervzrd is a Rust library that provides utilities for reading tabular data from files without worrying if they are formatted as CSV or JSON. It offers flexible functionality to extract headers and iterate over records, supporting different file formats and structures.
 
 ## Features
 
