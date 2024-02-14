@@ -79,10 +79,11 @@ jobs:
         with:
            version: 0.22.0
 
-      - name: Upload to codecov.io
-        uses: codecov/codecov-action@v3
-        with:
-          token: ${{secrets.CODECOV_TOKEN}}
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        env:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: datavzrd/readervzrd
 
       - name: Archive code coverage results
         uses: actions/upload-artifact@v1
