@@ -91,9 +91,9 @@ impl FileReader {
             .map(|record| record.iter().map(|field| field.to_string()).collect())
     }
 
-    fn read_json_records<'a>(
-        &'a mut self,
-    ) -> Result<impl Iterator<Item = Vec<String>> + 'a, FileError> {
+    fn read_json_records(
+        &mut self,
+    ) -> Result<impl Iterator<Item = Vec<String>> + '_, FileError> {
         let deserializer = Deserializer::from_reader(&mut self.file).into_iter::<Value>();
         let iter = deserializer
             .filter_map(Result::ok)
