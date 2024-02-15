@@ -1,7 +1,11 @@
 [package]
 name = "readervzrd"
-version = "0.1.0"
+description = "A generic reader for csv and json data"
+version = "0.0.1"
 edition = "2021"
+license = "MIT"
+authors = ["Felix Wiegand <felix.wiegand@tu-dortmund.de>"]
+repository = "https://github.com/datavzrd/readervzrd/"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
