@@ -57,10 +57,8 @@ impl FileReader {
 
     fn read_json_headers(&mut self) -> Result<Vec<String>, FileError> {
         let mut headers = Vec::new();
-        // Parse the JSON array at the outermost level
         if let Ok(value) = serde_json::from_reader(&mut self.file) {
             if let serde_json::Value::Array(array) = value {
-                // Iterate over the array and collect headers from each object
                 for item in array {
                     if let serde_json::Value::Object(obj) = item {
                         flatten_json_object(&mut headers, &obj, String::new());
@@ -93,7 +91,7 @@ impl FileReader {
             .map(|record| record.iter().map(|field| field.to_string()).collect())
     }
 
-    pub fn read_json_records<'a>(
+    fn read_json_records<'a>(
         &'a mut self,
     ) -> Result<impl Iterator<Item = Vec<String>> + 'a, FileError> {
         let deserializer = Deserializer::from_reader(&mut self.file).into_iter::<Value>();
