@@ -57,12 +57,10 @@ impl FileReader {
 
     fn read_json_headers(&mut self) -> Result<Vec<String>, FileError> {
         let mut headers = Vec::new();
-        if let Ok(value) = serde_json::from_reader(&mut self.file) {
-            if let serde_json::Value::Array(array) = value {
-                for item in array {
-                    if let serde_json::Value::Object(obj) = item {
-                        flatten_json_object(&mut headers, &obj, String::new());
-                    }
+        if let Ok(serde_json::Value::Array(array)) = serde_json::from_reader(&mut self.file) {
+            for item in array {
+                if let serde_json::Value::Object(obj) = item {
+                    flatten_json_object(&mut headers, &obj, String::new());
                 }
             }
         }
