@@ -1,3 +1,6 @@
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/datavzrd/readervzrd/rust.yml?branch=main&label=tests)](https://github.com/datavzrd/readervzrd/actions)
+[![codecov](https://codecov.io/gh/datavzrd/readervzrd/graph/badge.svg?token=556FEJ38IK)](https://codecov.io/gh/datavzrd/readervzrd)
+
 # readervzrd
 
 Readervzrd is a Rust library that provides utilities for reading tabular data from files without worrying if they are formatted as CSV or JSON. It offers flexible functionality to extract headers and iterate over records, supporting different file formats and structures.
@@ -26,6 +29,9 @@ use readervzrd::{FileReader, FileError};
 fn main() -> Result<(), FileError> {
     // Create a FileReader for a CSV file with ',' delimiter
     let mut reader = FileReader::new("data.csv", Some(','))?;
+
+    // Create another FileReader for a JSON file
+    let mut another_reader = FileReader::new("data.json", None)?;
 
     // Get headers from the file
     let headers = reader.headers()?;
