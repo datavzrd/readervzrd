@@ -10,11 +10,13 @@ enum FileFormat {
 
 impl FileFormat {
     pub fn from_file(file_path: &str, delimiter: Option<char>) -> Result<FileFormat, FileError> {
-        match (std::path::Path::new(file_path)
-            .extension()
-            .unwrap()
-            .to_str(), delimiter)
-        {
+        match (
+            std::path::Path::new(file_path)
+                .extension()
+                .unwrap()
+                .to_str(),
+            delimiter,
+        ) {
             (Some("csv" | "tsv"), Some(d)) => Ok(FileFormat::Csv(d)),
             (Some("json"), _) => Ok(FileFormat::Json),
             _ => Err(FileError::UnknownFileFormat),
@@ -31,10 +33,7 @@ impl FileReader {
     pub fn new(file_path: &str, delimiter: Option<char>) -> Result<FileReader, FileError> {
         let file_format = FileFormat::from_file(file_path, delimiter)?;
         let file = BufReader::new(File::open(file_path)?);
-        Ok(FileReader {
-            file_format,
-            file,
-        })
+        Ok(FileReader { file_format, file })
     }
 
     pub fn headers(&mut self) -> Result<Vec<String>, FileError> {
@@ -45,16 +44,18 @@ impl FileReader {
     }
 
     fn read_csv_headers(&mut self, delimiter: &char) -> Result<Vec<String>, FileError> {
-    let mut reader = csv::ReaderBuilder::new().delimiter(*delimiter as u8).from_reader(&mut self.file);
-    let headers = reader
-        .headers()
-        .unwrap()
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-    self.file.seek(SeekFrom::Start(0))?;
-    Ok(headers)
-}
+        let mut reader = csv::ReaderBuilder::new()
+            .delimiter(*delimiter as u8)
+            .from_reader(&mut self.file);
+        let headers = reader
+            .headers()
+            .unwrap()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        self.file.seek(SeekFrom::Start(0))?;
+        Ok(headers)
+    }
 
     fn read_json_headers(&mut self) -> Result<Vec<String>, FileError> {
         let mut headers = Vec::new();
@@ -74,32 +75,40 @@ impl FileReader {
 
     pub fn records(&mut self) -> Result<FlexRecordIter, FileError> {
         match &self.file_format {
-            FileFormat::Csv(delimiter) => Ok(FlexRecordIter::Csv(Box::new(self.read_csv_records(&delimiter.to_owned())))),
+            FileFormat::Csv(delimiter) => Ok(FlexRecordIter::Csv(Box::new(
+                self.read_csv_records(&delimiter.to_owned()),
+            ))),
             FileFormat::Json => Ok(FlexRecordIter::Json(Box::new(self.read_json_records()?))),
         }
     }
 
+    fn read_csv_records<'a>(
+        &'a mut self,
+        delimiter: &char,
+    ) -> impl Iterator<Item = Vec<String>> + 'a {
+        let mut reader = csv::ReaderBuilder::new()
+            .delimiter(*delimiter as u8)
+            .from_reader(&mut self.file);
+        let records: Vec<Vec<String>> = reader
+            .records()
+            .filter_map(Result::ok)
+            .map(|record| record.iter().map(|field| field.to_string()).collect())
+            .collect();
+        self.file
+            .seek(SeekFrom::Start(0))
+            .expect("Failed to seek to start");
+        records.into_iter()
+    }
 
-    fn read_csv_records<'a>(&'a mut self, delimiter: &char) -> impl Iterator<Item = Vec<String>> + 'a {
-    let mut reader = csv::ReaderBuilder::new().delimiter(*delimiter as u8).from_reader(&mut self.file);
-    let records: Vec<Vec<String>> = reader
-        .records()
-        .filter_map(Result::ok)
-        .map(|record| record.iter().map(|field| field.to_string()).collect())
-        .collect();
-    self.file.seek(SeekFrom::Start(0)).expect("Failed to seek to start");
-    records.into_iter()
-}
-
-    pub fn read_json_records<'a>(&'a mut self) -> Result<impl Iterator<Item = Vec<String>> + 'a, FileError> {
+    pub fn read_json_records<'a>(
+        &'a mut self,
+    ) -> Result<impl Iterator<Item = Vec<String>> + 'a, FileError> {
         let deserializer = Deserializer::from_reader(&mut self.file).into_iter::<Value>();
         let iter = deserializer
             .filter_map(Result::ok)
-            .flat_map(|value| {
-                match value {
-                    Value::Array(arr) => arr.into_iter().map(flatten_json_record),
-                    _ => panic!("Expected JSON array"),
-                }
+            .flat_map(|value| match value {
+                Value::Array(arr) => arr.into_iter().map(flatten_json_record),
+                _ => panic!("Expected JSON array"),
             });
         Ok(iter)
     }
@@ -184,22 +193,22 @@ impl PartialEq for FileError {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_csv_headers() {
-        let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
+        let mut reader =
+            FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
         let headers = reader.headers().expect("Failed to get headers");
         assert_eq!(headers, vec!["Name", "Age", "Country"]);
     }
 
     #[test]
     fn test_headers_does_not_drain_records() {
-        let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
+        let mut reader =
+            FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
         let headers = reader.headers().expect("Failed to get headers");
         let records: Vec<Vec<String>> = reader.records().unwrap().collect();
         assert_eq!(headers, vec!["Name", "Age", "Country"]);
@@ -208,7 +217,8 @@ mod tests {
 
     #[test]
     fn test_records_does_not_drain_headers() {
-        let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
+        let mut reader =
+            FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
         let records: Vec<Vec<String>> = reader.records().unwrap().collect();
         let headers = reader.headers().expect("Failed to get headers");
         assert_eq!(headers, vec!["Name", "Age", "Country"]);
@@ -217,15 +227,16 @@ mod tests {
 
     #[test]
     fn test_json_headers() {
-        let mut reader = FileReader::new("tests/test.json", None).expect("Failed to create FileReader");
+        let mut reader =
+            FileReader::new("tests/test.json", None).expect("Failed to create FileReader");
         let headers = reader.headers().expect("Failed to get headers");
         assert_eq!(headers, vec!["age", "country", "name"]);
     }
 
     #[test]
     fn test_nested_json_headers() {
-        let mut reader =
-            FileReader::new("tests/nested_test.json", Some(',')).expect("Failed to create FileReader");
+        let mut reader = FileReader::new("tests/nested_test.json", Some(','))
+            .expect("Failed to create FileReader");
         let headers = reader.headers().expect("Failed to get headers");
         assert_eq!(
             headers,
@@ -235,7 +246,8 @@ mod tests {
 
     #[test]
     fn test_csv_records() {
-        let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
+        let mut reader =
+            FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
         let records: Vec<Vec<String>> = reader.records().unwrap().collect();
         assert_eq!(records.len(), 3);
         assert_eq!(records[0], vec!["John", "30", "USA"]);
@@ -245,7 +257,8 @@ mod tests {
 
     #[test]
     fn test_json_records() {
-        let mut reader = FileReader::new("tests/test.json", None).expect("Failed to create FileReader");
+        let mut reader =
+            FileReader::new("tests/test.json", None).expect("Failed to create FileReader");
         let records: Vec<Vec<String>> = reader.records().unwrap().collect();
         assert_eq!(records.len(), 3);
         assert_eq!(records[0], vec!["30", "USA", "John"]);
@@ -266,7 +279,8 @@ mod tests {
 
     #[test]
     fn test_tsv_records() {
-        let mut reader = FileReader::new("tests/test.tsv", Some('\t')).expect("Failed to create FileReader");
+        let mut reader =
+            FileReader::new("tests/test.tsv", Some('\t')).expect("Failed to create FileReader");
         let records: Vec<Vec<String>> = reader.records().unwrap().collect();
         assert_eq!(records.len(), 3);
         assert_eq!(records[0], vec!["John", "30", "USA"]);
@@ -283,7 +297,8 @@ mod tests {
 
     #[test]
     fn test_json_records_with_inner_array() {
-        let mut reader = FileReader::new("tests/inner_array_test.json", None).expect("Failed to create FileReader");
+        let mut reader = FileReader::new("tests/inner_array_test.json", None)
+            .expect("Failed to create FileReader");
         let records: Vec<Vec<String>> = reader.records().unwrap().collect();
         assert_eq!(records.len(), 3);
         assert_eq!(records[0], vec!["30", "USA", "John", "[\"dog\",\"cat\"]"]);
@@ -293,14 +308,16 @@ mod tests {
 
     #[test]
     fn test_json_headers_with_inner_array() {
-        let mut reader = FileReader::new("tests/inner_array_test.json", None).expect("Failed to create FileReader");
+        let mut reader = FileReader::new("tests/inner_array_test.json", None)
+            .expect("Failed to create FileReader");
         let headers = reader.headers().expect("Failed to get headers");
         assert_eq!(headers, vec!["age", "country", "name", "pets"]);
     }
 
     #[test]
     fn test_json_records_with_mixed_key_order() {
-        let mut reader = FileReader::new("tests/mixed_key_order_test.json", None).expect("Failed to create FileReader");
+        let mut reader = FileReader::new("tests/mixed_key_order_test.json", None)
+            .expect("Failed to create FileReader");
         let records: Vec<Vec<String>> = reader.records().unwrap().collect();
         assert_eq!(records.len(), 3);
         assert_eq!(records[0], vec!["30", "USA", "John"]);
@@ -311,8 +328,17 @@ mod tests {
     #[test]
     fn test_partial_eq_file_error() {
         assert_eq!(FileError::UnknownFileFormat, FileError::UnknownFileFormat);
-        assert_eq!(FileError::InvalidJsonStructure, FileError::InvalidJsonStructure);
-        assert_eq!(FileError::IoError(io::Error::from(io::ErrorKind::NotFound)), FileError::IoError(io::Error::from(io::ErrorKind::NotFound)));
-        assert_ne!(FileError::UnknownFileFormat, FileError::InvalidJsonStructure);
+        assert_eq!(
+            FileError::InvalidJsonStructure,
+            FileError::InvalidJsonStructure
+        );
+        assert_eq!(
+            FileError::IoError(io::Error::from(io::ErrorKind::NotFound)),
+            FileError::IoError(io::Error::from(io::ErrorKind::NotFound))
+        );
+        assert_ne!(
+            FileError::UnknownFileFormat,
+            FileError::InvalidJsonStructure
+        );
     }
 }
