@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/datavzrd/readervzrd/compare/v0.1.0...v0.1.1) (2024-10-18)
+
+
+### Bug Fixes
+
+* Fix drainage of reader after calling either records or headers prior to each other (fixes [#2](https://github.com/datavzrd/readervzrd/issues/2)) ([0bdfd17](https://github.com/datavzrd/readervzrd/commit/0bdfd1790a81f1fdd2869a13bba199fe035f5789))
+
 ## 0.1.0 (2024-02-15)
 
 
