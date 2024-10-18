@@ -24,18 +24,50 @@ impl FileFormat {
     }
 }
 
+/// A struct that reads records from a file.
+/// The file can be in CSV or JSON format.
+/// The delimiter for CSV files can be specified.
+///
+/// # Examples
+///
+/// ```
+/// use readervzrd::FileReader;
+///
+/// let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
+/// let headers = reader.headers().expect("Failed to get headers");
+/// let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+/// ```
 pub struct FileReader {
     file_format: FileFormat,
     file: BufReader<File>,
 }
 
 impl FileReader {
+    /// Creates a new FileReader instance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use readervzrd::FileReader;
+    ///
+    /// let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
+    /// ```
     pub fn new(file_path: &str, delimiter: Option<char>) -> Result<FileReader, FileError> {
         let file_format = FileFormat::from_file(file_path, delimiter)?;
         let file = BufReader::new(File::open(file_path)?);
         Ok(FileReader { file_format, file })
     }
 
+    /// Returns the headers of the file.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use readervzrd::FileReader;
+    ///
+    /// let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
+    /// let headers = reader.headers().expect("Failed to get headers");
+    /// ```
     pub fn headers(&mut self) -> Result<Vec<String>, FileError> {
         match &self.file_format {
             FileFormat::Csv(delimiter) => self.read_csv_headers(&delimiter.to_owned()),
@@ -69,6 +101,19 @@ impl FileReader {
         Ok(headers)
     }
 
+    /// Returns an iterator over the records of the file.
+    /// Each record is a vector of strings.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use readervzrd::FileReader;
+    ///
+    /// let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
+    /// for record in reader.records().unwrap() {
+    ///    println!("{:?}", record);
+    /// }
+    /// ```
     pub fn records(&mut self) -> Result<FlexRecordIter, FileError> {
         match &self.file_format {
             FileFormat::Csv(delimiter) => Ok(FlexRecordIter::Csv(Box::new(
