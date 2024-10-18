@@ -1,6 +1,6 @@
 use serde_json::{Deserializer, Value};
 use std::fs::File;
-use std::io::{self, BufReader};
+use std::io::{self, BufReader, Seek, SeekFrom};
 use thiserror::Error;
 
 enum FileFormat {
@@ -45,14 +45,16 @@ impl FileReader {
     }
 
     fn read_csv_headers(&mut self, delimiter: &char) -> Result<Vec<String>, FileError> {
-        let mut reader = csv::ReaderBuilder::new().delimiter(delimiter.to_owned() as u8).from_reader(&mut self.file);
-        Ok(reader
-            .headers()
-            .unwrap()
-            .iter()
-            .map(|s| s.to_string())
-            .collect())
-    }
+    let mut reader = csv::ReaderBuilder::new().delimiter(*delimiter as u8).from_reader(&mut self.file);
+    let headers = reader
+        .headers()
+        .unwrap()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    self.file.seek(SeekFrom::Start(0))?;
+    Ok(headers)
+}
 
     fn read_json_headers(&mut self) -> Result<Vec<String>, FileError> {
         let mut headers = Vec::new();
@@ -79,11 +81,15 @@ impl FileReader {
 
 
     fn read_csv_records<'a>(&'a mut self, delimiter: &char) -> impl Iterator<Item = Vec<String>> + 'a {
-        let reader = csv::ReaderBuilder::new().delimiter(delimiter.to_owned() as u8).from_reader(&mut self.file);
-        reader.into_records().filter_map(Result::ok).map(|record| {
-            record.iter().map(|field| field.to_string()).collect()
-        })
-    }
+    let mut reader = csv::ReaderBuilder::new().delimiter(*delimiter as u8).from_reader(&mut self.file);
+    let records: Vec<Vec<String>> = reader
+        .records()
+        .filter_map(Result::ok)
+        .map(|record| record.iter().map(|field| field.to_string()).collect())
+        .collect();
+    self.file.seek(SeekFrom::Start(0)).expect("Failed to seek to start");
+    records.into_iter()
+}
 
     pub fn read_json_records<'a>(&'a mut self) -> Result<impl Iterator<Item = Vec<String>> + 'a, FileError> {
         let deserializer = Deserializer::from_reader(&mut self.file).into_iter::<Value>();
@@ -189,6 +195,24 @@ mod tests {
         let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
         let headers = reader.headers().expect("Failed to get headers");
         assert_eq!(headers, vec!["Name", "Age", "Country"]);
+    }
+
+    #[test]
+    fn test_headers_does_not_drain_records() {
+        let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
+        let headers = reader.headers().expect("Failed to get headers");
+        let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+        assert_eq!(headers, vec!["Name", "Age", "Country"]);
+        assert_eq!(records.len(), 3);
+    }
+
+    #[test]
+    fn test_records_does_not_drain_headers() {
+        let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
+        let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+        let headers = reader.headers().expect("Failed to get headers");
+        assert_eq!(headers, vec!["Name", "Age", "Country"]);
+        assert_eq!(records.len(), 3);
     }
 
     #[test]
