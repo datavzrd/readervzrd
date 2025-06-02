@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/datavzrd/readervzrd/compare/v0.1.1...v0.2.0) (2025-06-02)
+
+
+### Features
+
+* Add Parquet file support ([d95a028](https://github.com/datavzrd/readervzrd/commit/d95a02824095f416e24aae6f26c74d9b6a785370))
+
 ## [0.1.1](https://github.com/datavzrd/readervzrd/compare/v0.1.0...v0.1.1) (2024-10-18)
 
 
