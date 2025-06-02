@@ -1,11 +1,17 @@
+use parquet::data_type::AsBytes;
+use parquet::errors::ParquetError;
+use parquet::file::reader::{FileReader as ParquetFileReader, SerializedFileReader};
+use parquet::record::reader::RowIter;
 use serde_json::{Deserializer, Value};
 use std::fs::File;
 use std::io::{self, BufReader, Seek, SeekFrom};
+use std::sync::Arc;
 use thiserror::Error;
 
 enum FileFormat {
     Csv(char),
     Json,
+    Parquet,
 }
 
 impl FileFormat {
@@ -19,13 +25,14 @@ impl FileFormat {
         ) {
             (Some("csv" | "tsv"), Some(d)) => Ok(FileFormat::Csv(d)),
             (Some("json"), _) => Ok(FileFormat::Json),
+            (Some("parquet"), _) => Ok(FileFormat::Parquet),
             _ => Err(FileError::UnknownFileFormat),
         }
     }
 }
 
 /// A struct that reads records from a file.
-/// The file can be in CSV or JSON format.
+/// The file can be in CSV, JSON or Parquet format.
 /// The delimiter for CSV files can be specified.
 ///
 /// # Examples
@@ -34,6 +41,22 @@ impl FileFormat {
 /// use readervzrd::FileReader;
 ///
 /// let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
+/// let headers = reader.headers().expect("Failed to get headers");
+/// let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+/// ```
+///
+/// ```
+/// use readervzrd::FileReader;
+///
+/// let mut reader = FileReader::new("tests/test.json", None).expect("Failed to create FileReader");
+/// let headers = reader.headers().expect("Failed to get headers");
+/// let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+/// ```
+///
+/// ```
+/// use readervzrd::FileReader;
+///
+/// let mut reader = FileReader::new("tests/test.parquet", None).expect("Failed to create FileReader");
 /// let headers = reader.headers().expect("Failed to get headers");
 /// let records: Vec<Vec<String>> = reader.records().unwrap().collect();
 /// ```
@@ -50,7 +73,18 @@ impl FileReader {
     /// ```
     /// use readervzrd::FileReader;
     ///
-    /// let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
+    /// let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader"); // Create a new FileReader instance for CSV file
+    /// ```
+    ///
+    /// ```
+    /// use readervzrd::FileReader;
+    ///
+    /// let mut reader = FileReader::new("tests/test.parquet", None).expect("Failed to create FileReader"); // Create a new FileReader instance for Parquet file
+    /// ```
+    /// ```
+    /// use readervzrd::FileReader;
+    ///
+    /// let mut reader = FileReader::new("tests/test.json", None).expect("Failed to create FileReader"); // Create a new FileReader instance for JSON file
     /// ```
     pub fn new(file_path: &str, delimiter: Option<char>) -> Result<FileReader, FileError> {
         let file_format = FileFormat::from_file(file_path, delimiter)?;
@@ -72,6 +106,7 @@ impl FileReader {
         match &self.file_format {
             FileFormat::Csv(delimiter) => self.read_csv_headers(&delimiter.to_owned()),
             FileFormat::Json => self.read_json_headers(),
+            FileFormat::Parquet => self.read_parquet_headers(),
         }
     }
 
@@ -101,6 +136,25 @@ impl FileReader {
         Ok(headers)
     }
 
+    fn read_parquet_headers(&mut self) -> Result<Vec<String>, FileError> {
+        // Reset file position to start
+        self.file.seek(SeekFrom::Start(0))?;
+
+        // Create a parquet file reader
+        let file_reader = SerializedFileReader::new(self.file.get_ref().try_clone()?)?;
+        let parquet_metadata = file_reader.metadata();
+        let schema = parquet_metadata.file_metadata().schema_descr();
+
+        // Extract column names from schema
+        let headers: Vec<String> = schema
+            .columns()
+            .iter()
+            .map(|col| col.name().to_string())
+            .collect();
+
+        Ok(headers)
+    }
+
     /// Returns an iterator over the records of the file.
     /// Each record is a vector of strings.
     ///
@@ -120,6 +174,9 @@ impl FileReader {
                 self.read_csv_records(&delimiter.to_owned()),
             ))),
             FileFormat::Json => Ok(FlexRecordIter::Json(Box::new(self.read_json_records()?))),
+            FileFormat::Parquet => Ok(FlexRecordIter::Parquet(Box::new(
+                self.read_parquet_records()?,
+            ))),
         }
     }
 
@@ -153,20 +210,54 @@ impl FileReader {
             });
         Ok(iter)
     }
+
+    fn read_parquet_records(
+        &mut self,
+    ) -> Result<impl Iterator<Item = Vec<String>> + '_, FileError> {
+        self.file.seek(SeekFrom::Start(0))?;
+        let file_reader = Arc::new(SerializedFileReader::new(self.file.get_ref().try_clone()?)?);
+        let row_group_reader = file_reader.get_row_group(0)?;
+        let row_iter = RowIter::from_row_group(None, row_group_reader.as_ref())?;
+
+        // Convert rows to Vec<String>
+        let records: Vec<Vec<String>> = row_iter
+            .map(|row_result| match row_result {
+                Ok(row) => {
+                    let record: Vec<String> = (0..row.len())
+                        .filter_map(|i| row.get_column_iter().nth(i))
+                        .map(|(_name, value)| match value {
+                            parquet::record::Field::Str(s) => s.clone(),
+                            parquet::record::Field::Bytes(b) => {
+                                String::from_utf8_lossy(b.as_bytes()).to_string()
+                            }
+                            other => other.to_string(),
+                        })
+                        .collect();
+                    record
+                }
+                Err(_) => Vec::new(),
+            })
+            .filter(|record| !record.is_empty())
+            .collect();
+
+        Ok(records.into_iter())
+    }
 }
 
 pub enum FlexRecordIter<'a> {
     Csv(Box<dyn Iterator<Item = Vec<String>> + 'a>),
     Json(Box<dyn Iterator<Item = Vec<String>> + 'a>),
+    Parquet(Box<dyn Iterator<Item = Vec<String>> + 'a>),
 }
 
-impl<'a> Iterator for FlexRecordIter<'a> {
+impl Iterator for FlexRecordIter<'_> {
     type Item = Vec<String>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             FlexRecordIter::Csv(iter) => iter.next(),
             FlexRecordIter::Json(iter) => iter.next(),
+            FlexRecordIter::Parquet(iter) => iter.next(),
         }
     }
 }
@@ -221,6 +312,8 @@ pub enum FileError {
     InvalidJsonStructure,
     #[error("IO error: {0}")]
     IoError(#[from] io::Error),
+    #[error("Parquet error: {0}")]
+    ParquetError(#[from] ParquetError),
 }
 
 impl PartialEq for FileError {
@@ -381,5 +474,37 @@ mod tests {
             FileError::UnknownFileFormat,
             FileError::InvalidJsonStructure
         );
+    }
+
+    #[test]
+    fn test_parquet_records() {
+        let mut reader =
+            FileReader::new("tests/test.parquet", None).expect("Failed to create FileReader");
+        let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0], vec!["John", "30", "USA"]);
+        assert_eq!(records[1], vec!["Alice", "25", "UK"]);
+        assert_eq!(records[2], vec!["Bob", "40", "Canada"]);
+    }
+
+    #[test]
+    fn test_parquet_headers() {
+        let mut reader =
+            FileReader::new("tests/test.parquet", None).expect("Failed to create FileReader");
+        let headers = reader.headers().expect("Failed to get headers");
+
+        assert_eq!(headers, vec!["name", "age", "country"]);
+    }
+
+    #[test]
+    fn test_parquet_file_format_detection() {
+        let format = FileFormat::from_file("tests/test.parquet", None)
+            .expect("Failed to detect file format");
+
+        match format {
+            FileFormat::Parquet => assert!(true),
+            _ => panic!("Expected Parquet format"),
+        }
     }
 }
