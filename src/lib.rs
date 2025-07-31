@@ -16,13 +16,10 @@ enum FileFormat {
 
 impl FileFormat {
     pub fn from_file(file_path: &str, delimiter: Option<char>) -> Result<FileFormat, FileError> {
-        match (
-            std::path::Path::new(file_path)
-                .extension()
-                .unwrap()
-                .to_str(),
-            delimiter,
-        ) {
+        let extension = std::path::Path::new(file_path)
+            .extension()
+            .ok_or(FileError::MissingExtension(file_path.to_string()))?;
+        match (extension.to_str(), delimiter) {
             (Some("csv" | "tsv"), Some(d)) => Ok(FileFormat::Csv(d)),
             (Some("json"), _) => Ok(FileFormat::Json),
             (Some("parquet"), _) => Ok(FileFormat::Parquet),
@@ -306,6 +303,8 @@ fn flatten_json_object(
 
 #[derive(Debug, Error)]
 pub enum FileError {
+    #[error("Missing extension for {0}")]
+    MissingExtension(String),
     #[error("Unknown file format")]
     UnknownFileFormat,
     #[error("Invalid JSON structure")]
