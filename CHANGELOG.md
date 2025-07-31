@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/datavzrd/readervzrd/compare/v0.2.0...v0.2.1) (2025-07-31)
+
+
+### Bug Fixes
+
+* Handle missing file extension in FileFormat detection ([c3edc3d](https://github.com/datavzrd/readervzrd/commit/c3edc3d97f90a51e32c8e9d676417637394c16a9))
+
 ## [0.2.0](https://github.com/datavzrd/readervzrd/compare/v0.1.1...v0.2.0) (2025-06-02)
 
 
