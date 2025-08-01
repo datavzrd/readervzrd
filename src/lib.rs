@@ -303,7 +303,7 @@ fn flatten_json_object(
 
 #[derive(Debug, Error)]
 pub enum FileError {
-    #[error("Missing extension for {0}")]
+    #[error("Missing extension for file: {0}")]
     MissingExtension(String),
     #[error("Unknown file format")]
     UnknownFileFormat,
