@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/datavzrd/readervzrd/compare/v0.2.1...v0.2.2) (2025-08-01)
+
+
+### Bug Fixes
+
+* Clarify error message for missing file extension ([4f5ba40](https://github.com/datavzrd/readervzrd/commit/4f5ba404d7f52860a6429122420cb52c7097fd09))
+
 ## [0.2.1](https://github.com/datavzrd/readervzrd/compare/v0.2.0...v0.2.1) (2025-07-31)
 
 
