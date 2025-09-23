@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/datavzrd/readervzrd/compare/v0.2.1...v0.3.0) (2025-09-23)
+
+
+### Features
+
+* Add binary file detection for CSV processing ([b31657e](https://github.com/datavzrd/readervzrd/commit/b31657e764efbebd8b2c2e0fba9315172499fe4a))
+
+
+### Bug Fixes
+
+* Clarify error message for missing file extension ([4f5ba40](https://github.com/datavzrd/readervzrd/commit/4f5ba404d7f52860a6429122420cb52c7097fd09))
+
 ## [0.2.1](https://github.com/datavzrd/readervzrd/compare/v0.2.0...v0.2.1) (2025-07-31)
 
 
