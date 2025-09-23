@@ -4,7 +4,7 @@ use parquet::file::reader::{FileReader as ParquetFileReader, SerializedFileReade
 use parquet::record::reader::RowIter;
 use serde_json::{Deserializer, Value};
 use std::fs::File;
-use std::io::{self, BufReader, Seek, SeekFrom};
+use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -108,12 +108,14 @@ impl FileReader {
     }
 
     fn read_csv_headers(&mut self, delimiter: &char) -> Result<Vec<String>, FileError> {
+        self.check_if_text_file()?;
+
         let mut reader = csv::ReaderBuilder::new()
             .delimiter(*delimiter as u8)
             .from_reader(&mut self.file);
         let headers = reader
             .headers()
-            .unwrap()
+            .map_err(|_| FileError::BinaryFile)?
             .iter()
             .map(|s| s.to_string())
             .collect();
@@ -165,11 +167,15 @@ impl FileReader {
     ///    println!("{:?}", record);
     /// }
     /// ```
-    pub fn records(&mut self) -> Result<FlexRecordIter, FileError> {
+    pub fn records(&mut self) -> Result<FlexRecordIter<'_>, FileError> {
         match &self.file_format {
-            FileFormat::Csv(delimiter) => Ok(FlexRecordIter::Csv(Box::new(
-                self.read_csv_records(&delimiter.to_owned()),
-            ))),
+            FileFormat::Csv(delimiter) => {
+                let delimiter = delimiter.to_owned();
+                self.check_if_text_file()?;
+                Ok(FlexRecordIter::Csv(Box::new(
+                    self.read_csv_records(&delimiter),
+                )))
+            }
             FileFormat::Json => Ok(FlexRecordIter::Json(Box::new(self.read_json_records()?))),
             FileFormat::Parquet => Ok(FlexRecordIter::Parquet(Box::new(
                 self.read_parquet_records()?,
@@ -238,6 +244,29 @@ impl FileReader {
             .collect();
 
         Ok(records.into_iter())
+    }
+
+    fn check_if_text_file(&mut self) -> Result<(), FileError> {
+        let current_pos = self.file.stream_position()?;
+        self.file.seek(SeekFrom::Start(0))?;
+
+        let mut buffer = vec![0u8; 8192];
+        let bytes_read = self.file.read(&mut buffer)?;
+        buffer.truncate(bytes_read);
+
+        self.file.seek(SeekFrom::Start(current_pos))?;
+
+        if buffer.is_empty() {
+            return Ok(());
+        }
+
+        if buffer.contains(&0) {
+            return Err(FileError::BinaryFile);
+        }
+
+        std::str::from_utf8(&buffer)
+            .map(|_| ())
+            .map_err(|_| FileError::BinaryFile)
     }
 }
 
@@ -309,6 +338,8 @@ pub enum FileError {
     UnknownFileFormat,
     #[error("Invalid JSON structure")]
     InvalidJsonStructure,
+    #[error("File appears to be binary, not plain text")]
+    BinaryFile,
     #[error("IO error: {0}")]
     IoError(#[from] io::Error),
     #[error("Parquet error: {0}")]
@@ -320,6 +351,7 @@ impl PartialEq for FileError {
         match (self, other) {
             (FileError::UnknownFileFormat, FileError::UnknownFileFormat) => true,
             (FileError::InvalidJsonStructure, FileError::InvalidJsonStructure) => true,
+            (FileError::BinaryFile, FileError::BinaryFile) => true,
             (FileError::IoError(e1), FileError::IoError(e2)) => e1.kind() == e2.kind(),
             (_, _) => false,
         }
@@ -465,6 +497,7 @@ mod tests {
             FileError::InvalidJsonStructure,
             FileError::InvalidJsonStructure
         );
+        assert_eq!(FileError::BinaryFile, FileError::BinaryFile);
         assert_eq!(
             FileError::IoError(io::Error::from(io::ErrorKind::NotFound)),
             FileError::IoError(io::Error::from(io::ErrorKind::NotFound))
@@ -505,5 +538,28 @@ mod tests {
             FileFormat::Parquet => assert!(true),
             _ => panic!("Expected Parquet format"),
         }
+    }
+
+    #[test]
+    fn test_binary_file_detection() {
+        use std::io::Write;
+        let mut temp_file = std::fs::File::create("tests/binary_test.csv").unwrap();
+        temp_file
+            .write_all(&[0x00, 0xFF, 0xFE, 0x00, 0x01, 0x02, 0x03])
+            .unwrap();
+
+        let mut reader = FileReader::new("tests/binary_test.csv", Some(',')).unwrap();
+        let result = reader.headers();
+
+        std::fs::remove_file("tests/binary_test.csv").unwrap_or(());
+
+        assert!(result.is_err());
+        assert_eq!(Err(FileError::BinaryFile), result);
+    }
+
+    #[test]
+    fn test_valid_text_file_passes_check() {
+        let result = FileReader::new("tests/test.csv", Some(','));
+        assert!(result.is_ok());
     }
 }
