@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/datavzrd/readervzrd/compare/v0.3.0...v0.3.1) (2025-10-31)
+
+
+### Bug Fixes
+
+* Include file path in BinaryFile error variant ([97525dd](https://github.com/datavzrd/readervzrd/commit/97525dd513200a077a4f0da6db6d91ceb57fe5d2))
+
 ## [0.3.0](https://github.com/datavzrd/readervzrd/compare/v0.2.1...v0.3.0) (2025-09-23)
 
 
