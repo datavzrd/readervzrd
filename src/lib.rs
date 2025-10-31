@@ -273,9 +273,7 @@ impl FileReader {
             ));
         }
 
-        std::str::from_utf8(&buffer)
-            .map(|_| ())
-            .map_err(|_| FileError::BinaryFile(self.path.to_string_lossy().to_string()))
+        Ok(())
     }
 }
 
