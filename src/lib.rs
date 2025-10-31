@@ -5,6 +5,7 @@ use parquet::record::reader::RowIter;
 use serde_json::{Deserializer, Value};
 use std::fs::File;
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
+use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -60,6 +61,7 @@ impl FileFormat {
 pub struct FileReader {
     file_format: FileFormat,
     file: BufReader<File>,
+    path: PathBuf,
 }
 
 impl FileReader {
@@ -86,7 +88,12 @@ impl FileReader {
     pub fn new(file_path: &str, delimiter: Option<char>) -> Result<FileReader, FileError> {
         let file_format = FileFormat::from_file(file_path, delimiter)?;
         let file = BufReader::new(File::open(file_path)?);
-        Ok(FileReader { file_format, file })
+        let path = PathBuf::from(file_path);
+        Ok(FileReader {
+            file_format,
+            file,
+            path,
+        })
     }
 
     /// Returns the headers of the file.
@@ -115,7 +122,7 @@ impl FileReader {
             .from_reader(&mut self.file);
         let headers = reader
             .headers()
-            .map_err(|_| FileError::BinaryFile)?
+            .map_err(|_| FileError::BinaryFile(self.path.to_string_lossy().to_string()))?
             .iter()
             .map(|s| s.to_string())
             .collect();
@@ -261,12 +268,14 @@ impl FileReader {
         }
 
         if buffer.contains(&0) {
-            return Err(FileError::BinaryFile);
+            return Err(FileError::BinaryFile(
+                self.path.to_string_lossy().to_string(),
+            ));
         }
 
         std::str::from_utf8(&buffer)
             .map(|_| ())
-            .map_err(|_| FileError::BinaryFile)
+            .map_err(|_| FileError::BinaryFile(self.path.to_string_lossy().to_string()))
     }
 }
 
@@ -338,8 +347,8 @@ pub enum FileError {
     UnknownFileFormat,
     #[error("Invalid JSON structure")]
     InvalidJsonStructure,
-    #[error("File appears to be binary, not plain text")]
-    BinaryFile,
+    #[error("Given file {0} appears to be binary, not plain text")]
+    BinaryFile(String),
     #[error("IO error: {0}")]
     IoError(#[from] io::Error),
     #[error("Parquet error: {0}")]
@@ -351,7 +360,7 @@ impl PartialEq for FileError {
         match (self, other) {
             (FileError::UnknownFileFormat, FileError::UnknownFileFormat) => true,
             (FileError::InvalidJsonStructure, FileError::InvalidJsonStructure) => true,
-            (FileError::BinaryFile, FileError::BinaryFile) => true,
+            (FileError::BinaryFile(_), FileError::BinaryFile(_)) => true,
             (FileError::IoError(e1), FileError::IoError(e2)) => e1.kind() == e2.kind(),
             (_, _) => false,
         }
@@ -497,7 +506,10 @@ mod tests {
             FileError::InvalidJsonStructure,
             FileError::InvalidJsonStructure
         );
-        assert_eq!(FileError::BinaryFile, FileError::BinaryFile);
+        assert_eq!(
+            FileError::BinaryFile("".to_string()),
+            FileError::BinaryFile("".to_string())
+        );
         assert_eq!(
             FileError::IoError(io::Error::from(io::ErrorKind::NotFound)),
             FileError::IoError(io::Error::from(io::ErrorKind::NotFound))
@@ -554,7 +566,10 @@ mod tests {
         std::fs::remove_file("tests/binary_test.csv").unwrap_or(());
 
         assert!(result.is_err());
-        assert_eq!(Err(FileError::BinaryFile), result);
+        assert_eq!(
+            Err(FileError::BinaryFile("tests/binary_test.csv".to_string())),
+            result
+        );
     }
 
     #[test]
