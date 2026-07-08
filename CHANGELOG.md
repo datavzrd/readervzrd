@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/datavzrd/readervzrd/compare/v0.3.2...v0.4.0) (2026-07-08)
+
+
+### Features
+
+* Allow gzipped csv and json inputs ([#49](https://github.com/datavzrd/readervzrd/issues/49)) ([6dcb363](https://github.com/datavzrd/readervzrd/commit/6dcb363828b4cc4915c437ea1ad1147078f3cbe0))
+
 ## [0.3.2](https://github.com/datavzrd/readervzrd/compare/v0.3.1...v0.3.2) (2025-10-31)
 
 
