@@ -1,3 +1,4 @@
+use flate2::read::GzDecoder;
 use parquet::data_type::AsBytes;
 use parquet::errors::ParquetError;
 use parquet::file::reader::{FileReader as ParquetFileReader, SerializedFileReader};
@@ -16,21 +17,37 @@ enum FileFormat {
 }
 
 impl FileFormat {
-    pub fn from_file(file_path: &str, delimiter: Option<char>) -> Result<FileFormat, FileError> {
-        let extension = std::path::Path::new(file_path)
+    /// Determines the file format from the file extension.
+    /// Returns the format and whether the file is gzip compressed (`.gz` suffix).
+    pub fn from_file(
+        file_path: &str,
+        delimiter: Option<char>,
+    ) -> Result<(FileFormat, bool), FileError> {
+        let path = std::path::Path::new(file_path);
+        let mut extension = path
             .extension()
             .ok_or(FileError::MissingExtension(file_path.to_string()))?;
-        match (extension.to_str(), delimiter) {
-            (Some("csv" | "tsv"), Some(d)) => Ok(FileFormat::Csv(d)),
-            (Some("json"), _) => Ok(FileFormat::Json),
-            (Some("parquet"), _) => Ok(FileFormat::Parquet),
-            _ => Err(FileError::UnknownFileFormat),
+        let gzipped = extension.eq_ignore_ascii_case("gz");
+        if gzipped {
+            extension = path
+                .file_stem()
+                .map(std::path::Path::new)
+                .and_then(|stem| stem.extension())
+                .ok_or(FileError::MissingExtension(file_path.to_string()))?;
         }
+        let format = match (extension.to_str(), delimiter) {
+            (Some("csv" | "tsv"), Some(d)) => FileFormat::Csv(d),
+            (Some("json"), _) => FileFormat::Json,
+            (Some("parquet"), _) if !gzipped => FileFormat::Parquet,
+            _ => return Err(FileError::UnknownFileFormat),
+        };
+        Ok((format, gzipped))
     }
 }
 
 /// A struct that reads records from a file.
 /// The file can be in CSV, JSON or Parquet format.
+/// CSV, TSV and JSON files may additionally be gzip compressed (e.g. `data.csv.gz`).
 /// The delimiter for CSV files can be specified.
 ///
 /// # Examples
@@ -58,10 +75,19 @@ impl FileFormat {
 /// let headers = reader.headers().expect("Failed to get headers");
 /// let records: Vec<Vec<String>> = reader.records().unwrap().collect();
 /// ```
+///
+/// ```
+/// use readervzrd::FileReader;
+///
+/// let mut reader = FileReader::new("tests/test.csv.gz", Some(',')).expect("Failed to create FileReader");
+/// let headers = reader.headers().expect("Failed to get headers");
+/// let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+/// ```
 pub struct FileReader {
     file_format: FileFormat,
     file: BufReader<File>,
     path: PathBuf,
+    gzipped: bool,
 }
 
 impl FileReader {
@@ -86,14 +112,25 @@ impl FileReader {
     /// let mut reader = FileReader::new("tests/test.json", None).expect("Failed to create FileReader"); // Create a new FileReader instance for JSON file
     /// ```
     pub fn new(file_path: &str, delimiter: Option<char>) -> Result<FileReader, FileError> {
-        let file_format = FileFormat::from_file(file_path, delimiter)?;
+        let (file_format, gzipped) = FileFormat::from_file(file_path, delimiter)?;
         let file = BufReader::new(File::open(file_path)?);
         let path = PathBuf::from(file_path);
         Ok(FileReader {
             file_format,
             file,
             path,
+            gzipped,
         })
+    }
+
+    /// Returns a reader over the (decompressed) file content, starting at the beginning.
+    fn data_reader(&mut self) -> Result<Box<dyn Read + '_>, FileError> {
+        self.file.seek(SeekFrom::Start(0))?;
+        if self.gzipped {
+            Ok(Box::new(GzDecoder::new(&mut self.file)))
+        } else {
+            Ok(Box::new(&mut self.file))
+        }
     }
 
     /// Returns the headers of the file.
@@ -117,22 +154,22 @@ impl FileReader {
     fn read_csv_headers(&mut self, delimiter: &char) -> Result<Vec<String>, FileError> {
         self.check_if_text_file()?;
 
+        let path = self.path.to_string_lossy().to_string();
         let mut reader = csv::ReaderBuilder::new()
             .delimiter(*delimiter as u8)
-            .from_reader(&mut self.file);
+            .from_reader(self.data_reader()?);
         let headers = reader
             .headers()
-            .map_err(|_| FileError::BinaryFile(self.path.to_string_lossy().to_string()))?
+            .map_err(|_| FileError::BinaryFile(path))?
             .iter()
             .map(|s| s.to_string())
             .collect();
-        self.file.seek(SeekFrom::Start(0))?;
         Ok(headers)
     }
 
     fn read_json_headers(&mut self) -> Result<Vec<String>, FileError> {
         let mut headers = Vec::new();
-        if let Ok(serde_json::Value::Array(array)) = serde_json::from_reader(&mut self.file) {
+        if let Ok(serde_json::Value::Array(array)) = serde_json::from_reader(self.data_reader()?) {
             for item in array {
                 if let serde_json::Value::Object(obj) = item {
                     flatten_json_object(&mut headers, &obj, String::new());
@@ -180,7 +217,7 @@ impl FileReader {
                 let delimiter = delimiter.to_owned();
                 self.check_if_text_file()?;
                 Ok(FlexRecordIter::Csv(Box::new(
-                    self.read_csv_records(&delimiter),
+                    self.read_csv_records(&delimiter)?,
                 )))
             }
             FileFormat::Json => Ok(FlexRecordIter::Json(Box::new(self.read_json_records()?))),
@@ -190,28 +227,25 @@ impl FileReader {
         }
     }
 
-    fn read_csv_records<'a>(
-        &'a mut self,
+    fn read_csv_records(
+        &mut self,
         delimiter: &char,
-    ) -> impl Iterator<Item = Vec<String>> + 'a {
+    ) -> Result<impl Iterator<Item = Vec<String>>, FileError> {
         let mut reader = csv::ReaderBuilder::new()
             .delimiter(*delimiter as u8)
-            .from_reader(&mut self.file);
+            .from_reader(self.data_reader()?);
         let records: Vec<Vec<String>> = reader
             .records()
             .filter_map(Result::ok)
             .map(|record| record.iter().map(|field| field.to_string()).collect())
             .collect();
-        self.file
-            .seek(SeekFrom::Start(0))
-            .expect("Failed to seek to start");
-        records.into_iter()
+        Ok(records.into_iter())
     }
 
     pub fn read_json_records(
         &mut self,
     ) -> Result<impl Iterator<Item = Vec<String>> + '_, FileError> {
-        let deserializer = Deserializer::from_reader(&mut self.file).into_iter::<Value>();
+        let deserializer = Deserializer::from_reader(self.data_reader()?).into_iter::<Value>();
         let iter = deserializer
             .filter_map(Result::ok)
             .flat_map(|value| match value {
@@ -258,7 +292,11 @@ impl FileReader {
         self.file.seek(SeekFrom::Start(0))?;
 
         let mut buffer = vec![0u8; 8192];
-        let bytes_read = self.file.read(&mut buffer)?;
+        let bytes_read = if self.gzipped {
+            GzDecoder::new(&mut self.file).read(&mut buffer)?
+        } else {
+            self.file.read(&mut buffer)?
+        };
         buffer.truncate(bytes_read);
 
         self.file.seek(SeekFrom::Start(current_pos))?;
@@ -541,13 +579,82 @@ mod tests {
 
     #[test]
     fn test_parquet_file_format_detection() {
-        let format = FileFormat::from_file("tests/test.parquet", None)
+        let (format, gzipped) = FileFormat::from_file("tests/test.parquet", None)
             .expect("Failed to detect file format");
 
+        assert!(!gzipped);
         match format {
             FileFormat::Parquet => assert!(true),
             _ => panic!("Expected Parquet format"),
         }
+    }
+
+    #[test]
+    fn test_gzipped_csv_headers() {
+        let mut reader =
+            FileReader::new("tests/test.csv.gz", Some(',')).expect("Failed to create FileReader");
+        let headers = reader.headers().expect("Failed to get headers");
+        assert_eq!(headers, vec!["Name", "Age", "Country"]);
+    }
+
+    #[test]
+    fn test_gzipped_csv_records() {
+        let mut reader =
+            FileReader::new("tests/test.csv.gz", Some(',')).expect("Failed to create FileReader");
+        let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0], vec!["John", "30", "USA"]);
+        assert_eq!(records[1], vec!["Alice", "25", "UK"]);
+        assert_eq!(records[2], vec!["Bob", "40", "Canada"]);
+    }
+
+    #[test]
+    fn test_gzipped_csv_headers_do_not_drain_records() {
+        let mut reader =
+            FileReader::new("tests/test.csv.gz", Some(',')).expect("Failed to create FileReader");
+        let headers = reader.headers().expect("Failed to get headers");
+        let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+        assert_eq!(headers, vec!["Name", "Age", "Country"]);
+        assert_eq!(records.len(), 3);
+    }
+
+    #[test]
+    fn test_gzipped_tsv_records() {
+        let mut reader =
+            FileReader::new("tests/test.tsv.gz", Some('\t')).expect("Failed to create FileReader");
+        let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0], vec!["John", "30", "USA"]);
+        assert_eq!(records[1], vec!["Alice", "25", "UK"]);
+        assert_eq!(records[2], vec!["Bob", "40", "Canada"]);
+    }
+
+    #[test]
+    fn test_gzipped_json_headers_and_records() {
+        let mut reader =
+            FileReader::new("tests/test.json.gz", None).expect("Failed to create FileReader");
+        let headers = reader.headers().expect("Failed to get headers");
+        let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+        assert_eq!(headers, vec!["age", "country", "name"]);
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0], vec!["30", "USA", "John"]);
+    }
+
+    #[test]
+    fn test_gzipped_parquet_is_rejected() {
+        let result = FileReader::new("tests/test.parquet.gz", None);
+        assert!(result.is_err());
+        assert_eq!(result.err().unwrap(), FileError::UnknownFileFormat);
+    }
+
+    #[test]
+    fn test_gz_without_inner_extension() {
+        let result = FileReader::new("tests/test.gz", None);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.err().unwrap(),
+            FileError::MissingExtension(_)
+        ));
     }
 
     #[test]
