@@ -8,6 +8,7 @@ Readervzrd is a Rust library that provides utilities for reading tabular data fr
 ## Features
 
 - Supports uniform reading of data from CSV, JSON and Parquet files.
+- Supports gzip compressed CSV, TSV and JSON files (e.g. `data.csv.gz`).
 - Extracts headers from files.
 - Iterate over records
 - Handling of nested JSON structures
@@ -35,6 +36,9 @@ fn main() -> Result<(), FileError> {
 
     // Create another FileReader for a Parquet file
     let mut parquet_reader = FileReader::new("data.parquet", None)?;
+
+    // Create another FileReader for a gzip compressed CSV file
+    let mut gz_reader = FileReader::new("data.csv.gz", Some(','))?;
 
     // Get headers from the file
     let headers = reader.headers()?;

@@ -680,6 +680,7 @@ name = "readervzrd"
 version = "0.3.2"
 dependencies = [
  "csv",
+ "flate2",
  "parquet",
  "serde",
  "serde_json",
