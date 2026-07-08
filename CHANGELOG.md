@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/datavzrd/readervzrd/compare/v0.3.1...v0.3.2) (2025-10-31)
+
+
+### Bug Fixes
+
+* Remove faulty UTF-8 check from FileReader read method ([7a7aed3](https://github.com/datavzrd/readervzrd/commit/7a7aed3700ccb8dc8b34f355135d141ce6a438dd))
+
 ## [0.3.1](https://github.com/datavzrd/readervzrd/compare/v0.3.0...v0.3.1) (2025-10-31)
 
 
