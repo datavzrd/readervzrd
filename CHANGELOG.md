@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/datavzrd/readervzrd/compare/v0.4.0...v0.4.1) (2026-08-31)
+
+
+### Performance Improvements
+
+* Stream CSV records instead of buffering the whole file ([#57](https://github.com/datavzrd/readervzrd/issues/57)) ([6e4e185](https://github.com/datavzrd/readervzrd/commit/6e4e185f5ffd7466238aa90c2e65e368e11357a6))
+
 ## [0.4.0](https://github.com/datavzrd/readervzrd/compare/v0.3.2...v0.4.0) (2026-07-08)
 
 
