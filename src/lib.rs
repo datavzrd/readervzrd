@@ -230,16 +230,14 @@ impl FileReader {
     fn read_csv_records(
         &mut self,
         delimiter: &char,
-    ) -> Result<impl Iterator<Item = Vec<String>>, FileError> {
-        let mut reader = csv::ReaderBuilder::new()
+    ) -> Result<impl Iterator<Item = Vec<String>> + '_, FileError> {
+        let reader = csv::ReaderBuilder::new()
             .delimiter(*delimiter as u8)
             .from_reader(self.data_reader()?);
-        let records: Vec<Vec<String>> = reader
-            .records()
+        Ok(reader
+            .into_records()
             .filter_map(Result::ok)
-            .map(|record| record.iter().map(|field| field.to_string()).collect())
-            .collect();
-        Ok(records.into_iter())
+            .map(|record| record.iter().map(|field| field.to_string()).collect()))
     }
 
     pub fn read_json_records(
