@@ -268,6 +268,7 @@ impl FileReader {
                     let record: Vec<String> = (0..row.len())
                         .filter_map(|i| row.get_column_iter().nth(i))
                         .map(|(_name, value)| match value {
+                            parquet::record::Field::Null => String::new(),
                             parquet::record::Field::Str(s) => s.clone(),
                             parquet::record::Field::Bytes(b) => {
                                 String::from_utf8_lossy(b.as_bytes()).to_string()
@@ -564,6 +565,19 @@ mod tests {
         assert_eq!(records[0], vec!["John", "30", "USA"]);
         assert_eq!(records[1], vec!["Alice", "25", "UK"]);
         assert_eq!(records[2], vec!["Bob", "40", "Canada"]);
+    }
+
+    #[test]
+    fn test_parquet_records_with_nulls() {
+        let mut reader =
+            FileReader::new("tests/test_nulls.parquet", None).expect("Failed to create FileReader");
+        let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+
+        assert_eq!(records.len(), 4);
+        assert_eq!(records[0], vec!["alpha", "1", "0.5", "true"]);
+        assert_eq!(records[1], vec!["", "2", "", ""]);
+        assert_eq!(records[2], vec!["gamma", "", "2.5", "false"]);
+        assert_eq!(records[3], vec!["delta", "4", "", ""]);
     }
 
     #[test]
