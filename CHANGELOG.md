@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3](https://github.com/datavzrd/readervzrd/compare/v0.4.2...v0.4.3) (2026-09-22)
+
+
+### Bug Fixes
+
+* Trigger release for parquet null value fix ([7643ba2](https://github.com/datavzrd/readervzrd/commit/7643ba263b1df11d3723bc7c01d101c9478bc184))
+
 ## [0.4.2](https://github.com/datavzrd/readervzrd/compare/v0.4.1...v0.4.2) (2026-09-22)
 
 
