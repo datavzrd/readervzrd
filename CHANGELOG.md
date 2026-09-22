@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/datavzrd/readervzrd/compare/v0.4.1...v0.4.2) (2026-09-22)
+
+
+### Bug Fixes
+
+* Read parquet null values as empty strings ([#64](https://github.com/datavzrd/readervzrd/issues/64)) ([485da11](https://github.com/datavzrd/readervzrd/commit/485da11a7d317c74caf813de6305c84f31cdd7b7))
+
 ## [0.4.1](https://github.com/datavzrd/readervzrd/compare/v0.4.0...v0.4.1) (2026-08-31)
 
 
