@@ -227,6 +227,55 @@ impl FileReader {
         }
     }
 
+    /// Checks that every record of the file can be read.
+    ///
+    /// [`records`](FileReader::records) skips records that cannot be parsed, so this should be
+    /// called beforehand in order to report e.g. invalid UTF-8 or rows with a wrong number of
+    /// fields instead of silently losing them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use readervzrd::FileReader;
+    ///
+    /// let mut reader = FileReader::new("tests/test.csv", Some(',')).expect("Failed to create FileReader");
+    /// reader.validate().expect("File contains invalid records");
+    /// ```
+    pub fn validate(&mut self) -> Result<(), FileError> {
+        let path = self.path.to_string_lossy().to_string();
+        match &self.file_format {
+            FileFormat::Csv(delimiter) => {
+                let delimiter = delimiter.to_owned();
+                self.check_if_text_file()?;
+                let mut reader = csv::ReaderBuilder::new()
+                    .delimiter(delimiter as u8)
+                    .from_reader(self.data_reader()?);
+                for record in reader.records() {
+                    record.map_err(|err| csv_record_error(path.clone(), err))?;
+                }
+            }
+            FileFormat::Json => {
+                for value in Deserializer::from_reader(self.data_reader()?).into_iter::<Value>() {
+                    let value = value.map_err(|err| FileError::ParseError {
+                        path: path.clone(),
+                        message: err.to_string(),
+                    })?;
+                    if !value.is_array() {
+                        return Err(FileError::InvalidJsonStructure);
+                    }
+                }
+            }
+            FileFormat::Parquet => {
+                self.file.seek(SeekFrom::Start(0))?;
+                let file_reader = SerializedFileReader::new(self.file.get_ref().try_clone()?)?;
+                for row in file_reader.get_row_iter(None)? {
+                    row?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn read_csv_records(
         &mut self,
         delimiter: &char,
@@ -332,6 +381,30 @@ impl Iterator for FlexRecordIter<'_> {
     }
 }
 
+fn csv_record_error(path: String, err: csv::Error) -> FileError {
+    let line = |pos: &Option<csv::Position>| pos.as_ref().map_or(0, |pos| pos.line());
+    match err.kind() {
+        csv::ErrorKind::Utf8 { pos, .. } => FileError::InvalidUtf8 {
+            path,
+            line: line(pos),
+        },
+        csv::ErrorKind::UnequalLengths {
+            pos,
+            expected_len,
+            len,
+        } => FileError::UnequalFieldCount {
+            path,
+            line: line(pos),
+            expected: *expected_len,
+            found: *len,
+        },
+        _ => FileError::ParseError {
+            path,
+            message: err.to_string(),
+        },
+    }
+}
+
 fn flatten_json_record(value: Value) -> Vec<String> {
     match value {
         Value::String(s) => vec![s],
@@ -384,6 +457,17 @@ pub enum FileError {
     InvalidJsonStructure,
     #[error("Given file {0} appears to be binary, not plain text")]
     BinaryFile(String),
+    #[error("Line {line} of {path} is not valid UTF-8, please save the file with UTF-8 encoding")]
+    InvalidUtf8 { path: String, line: u64 },
+    #[error("Line {line} of {path} has a different number of fields ({found}) than the header ({expected})")]
+    UnequalFieldCount {
+        path: String,
+        line: u64,
+        expected: u64,
+        found: u64,
+    },
+    #[error("Failed to parse {path}: {message}")]
+    ParseError { path: String, message: String },
     #[error("IO error: {0}")]
     IoError(#[from] io::Error),
     #[error("Parquet error: {0}")]
@@ -693,5 +777,74 @@ mod tests {
     fn test_valid_text_file_passes_check() {
         let result = FileReader::new("tests/test.csv", Some(','));
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_valid_files() {
+        for (path, delimiter) in [
+            ("tests/test.csv", Some(',')),
+            ("tests/test.tsv", Some('\t')),
+            ("tests/test.csv.gz", Some(',')),
+            ("tests/test.json", None),
+            ("tests/test.parquet", None),
+        ] {
+            let mut reader = FileReader::new(path, delimiter).unwrap();
+            assert!(reader.validate().is_ok(), "{path} should be valid");
+        }
+    }
+
+    #[test]
+    fn test_validate_invalid_utf8() {
+        std::fs::write(
+            "tests/invalid_utf8_test.csv",
+            b"Name,Age\nJohn,30\nM\xfcller,25\n",
+        )
+        .unwrap();
+
+        let mut reader = FileReader::new("tests/invalid_utf8_test.csv", Some(',')).unwrap();
+        let result = reader.validate();
+
+        std::fs::remove_file("tests/invalid_utf8_test.csv").unwrap_or(());
+
+        assert!(matches!(
+            result,
+            Err(FileError::InvalidUtf8 { line: 3, .. })
+        ));
+    }
+
+    #[test]
+    fn test_validate_unequal_field_count() {
+        std::fs::write(
+            "tests/unequal_fields_test.csv",
+            "Name,Age\nJohn,30\nAlice,25,UK\n",
+        )
+        .unwrap();
+
+        let mut reader = FileReader::new("tests/unequal_fields_test.csv", Some(',')).unwrap();
+        let result = reader.validate();
+
+        std::fs::remove_file("tests/unequal_fields_test.csv").unwrap_or(());
+
+        assert!(matches!(
+            result,
+            Err(FileError::UnequalFieldCount {
+                line: 3,
+                expected: 2,
+                found: 3,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_validate_invalid_json() {
+        std::fs::write("tests/invalid_json_test.json", r#"[{"name": "John",}]"#).unwrap();
+
+        let mut reader = FileReader::new("tests/invalid_json_test.json", None).unwrap();
+        let result = reader.validate();
+
+        std::fs::remove_file("tests/invalid_json_test.json").unwrap_or(());
+
+        assert!(matches!(result, Err(FileError::ParseError { .. })));
     }
 }
