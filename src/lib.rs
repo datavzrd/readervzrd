@@ -6,7 +6,7 @@ use parquet::record::reader::RowIter;
 use serde_json::{Deserializer, Value};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, BufReader, Read, Seek, SeekFrom};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
@@ -134,6 +134,15 @@ impl FileReader {
         }
     }
 
+    /// Returns a reader over the JSON content, skipping a UTF-8 byte order mark.
+    fn json_reader(&mut self) -> Result<impl Read + '_, FileError> {
+        let mut reader = BufReader::new(self.data_reader()?);
+        if reader.fill_buf()?.starts_with(b"\xEF\xBB\xBF") {
+            reader.consume(3);
+        }
+        Ok(reader)
+    }
+
     /// Returns the headers of the file.
     ///
     /// # Examples
@@ -170,7 +179,7 @@ impl FileReader {
 
     fn read_json_headers(&mut self) -> Result<Vec<String>, FileError> {
         let mut headers = Vec::new();
-        if let Ok(serde_json::Value::Array(array)) = serde_json::from_reader(self.data_reader()?) {
+        if let Ok(serde_json::Value::Array(array)) = serde_json::from_reader(self.json_reader()?) {
             for item in array {
                 if let serde_json::Value::Object(obj) = item {
                     flatten_json_object(&mut headers, &obj, String::new());
@@ -271,7 +280,7 @@ impl FileReader {
                 }
             }
             FileFormat::Json => {
-                for value in Deserializer::from_reader(self.data_reader()?).into_iter::<Value>() {
+                for value in Deserializer::from_reader(self.json_reader()?).into_iter::<Value>() {
                     let value = value.map_err(|err| FileError::ParseError {
                         path: path.clone(),
                         message: err.to_string(),
@@ -367,7 +376,7 @@ impl FileReader {
         &mut self,
     ) -> Result<impl Iterator<Item = Vec<String>> + '_, FileError> {
         let headers = self.read_json_headers()?;
-        let deserializer = Deserializer::from_reader(self.data_reader()?).into_iter::<Value>();
+        let deserializer = Deserializer::from_reader(self.json_reader()?).into_iter::<Value>();
         let iter = deserializer
             .filter_map(Result::ok)
             .flat_map(move |value| match value {
@@ -700,6 +709,26 @@ mod tests {
         assert_eq!(headers, vec!["age", "member", "name"]);
         assert_eq!(records[0], vec!["30", "true", "John"]);
         assert_eq!(records[1], vec!["", "", "Alice"]);
+    }
+
+    #[test]
+    fn test_json_with_byte_order_mark() {
+        std::fs::write(
+            "tests/byte_order_mark_test.json",
+            b"\xEF\xBB\xBF[{\"name\": \"John\", \"age\": 30}]",
+        )
+        .unwrap();
+
+        let mut reader = FileReader::new("tests/byte_order_mark_test.json", None).unwrap();
+        let validation = reader.validate();
+        let headers = reader.headers().unwrap();
+        let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+
+        std::fs::remove_file("tests/byte_order_mark_test.json").unwrap_or(());
+
+        assert!(validation.is_ok());
+        assert_eq!(headers, vec!["age", "name"]);
+        assert_eq!(records, vec![vec!["30", "John"]]);
     }
 
     #[test]
