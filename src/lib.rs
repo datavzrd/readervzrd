@@ -4,6 +4,7 @@ use parquet::errors::ParquetError;
 use parquet::file::reader::{FileReader as ParquetFileReader, SerializedFileReader};
 use parquet::record::reader::RowIter;
 use serde_json::{Deserializer, Value};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
@@ -365,11 +366,15 @@ impl FileReader {
     pub fn read_json_records(
         &mut self,
     ) -> Result<impl Iterator<Item = Vec<String>> + '_, FileError> {
+        let headers = self.read_json_headers()?;
         let deserializer = Deserializer::from_reader(self.data_reader()?).into_iter::<Value>();
         let iter = deserializer
             .filter_map(Result::ok)
-            .flat_map(|value| match value {
-                Value::Array(arr) => arr.into_iter().map(flatten_json_record),
+            .flat_map(move |value| match value {
+                Value::Array(arr) => arr
+                    .into_iter()
+                    .map(|item| json_record(item, &headers))
+                    .collect::<Vec<_>>(),
                 _ => panic!("Expected JSON array"),
             });
         Ok(iter)
@@ -465,17 +470,36 @@ enum InvalidCsvRecord {
     },
 }
 
-fn flatten_json_record(value: Value) -> Vec<String> {
-    match value {
-        Value::String(s) => vec![s],
-        Value::Number(n) => vec![n.to_string()],
-        Value::Array(a) => vec![serde_json::to_string(&a).unwrap()],
-        Value::Object(obj) => obj
-            .into_iter()
-            .flat_map(|(_, v)| flatten_json_record(v))
-            .collect(),
-        _ => unreachable!("Unexpected value type"),
-    }
+/// Returns the values of a JSON record in the order of the given headers, leaving missing keys empty.
+fn json_record(item: Value, headers: &[String]) -> Vec<String> {
+    let mut fields = HashMap::new();
+    flatten_json_fields(&mut fields, item, String::new());
+    headers
+        .iter()
+        .map(|header| fields.remove(header).unwrap_or_default())
+        .collect()
+}
+
+fn flatten_json_fields(fields: &mut HashMap<String, String>, value: Value, key: String) {
+    let field = match value {
+        Value::Object(obj) => {
+            for (inner_key, inner_value) in obj {
+                let inner_key = if key.is_empty() {
+                    inner_key
+                } else {
+                    format!("{}.{}", key, inner_key)
+                };
+                flatten_json_fields(fields, inner_value, inner_key);
+            }
+            return;
+        }
+        Value::Null => String::new(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => s,
+        Value::Array(a) => serde_json::to_string(&a).unwrap(),
+    };
+    fields.insert(key, field);
 }
 
 fn flatten_json_object(
@@ -657,6 +681,25 @@ mod tests {
         assert_eq!(records[0], vec!["30", "USA", "John", "[\"dog\",\"cat\"]"]);
         assert_eq!(records[1], vec!["25", "UK", "Alice", "[\"rabbit\"]"]);
         assert_eq!(records[2], vec!["40", "Canada", "Bob", "[]"]);
+    }
+
+    #[test]
+    fn test_json_records_with_missing_keys_booleans_and_null() {
+        std::fs::write(
+            "tests/missing_keys_test.json",
+            r#"[{"name": "John", "age": 30, "member": true}, {"name": "Alice", "age": null}]"#,
+        )
+        .unwrap();
+
+        let mut reader = FileReader::new("tests/missing_keys_test.json", None).unwrap();
+        let headers = reader.headers().unwrap();
+        let records: Vec<Vec<String>> = reader.records().unwrap().collect();
+
+        std::fs::remove_file("tests/missing_keys_test.json").unwrap_or(());
+
+        assert_eq!(headers, vec!["age", "member", "name"]);
+        assert_eq!(records[0], vec!["30", "true", "John"]);
+        assert_eq!(records[1], vec!["", "", "Alice"]);
     }
 
     #[test]
