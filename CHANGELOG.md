@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/datavzrd/readervzrd/compare/v0.4.3...v0.5.0) (2026-10-18)
+
+
+### Features
+
+* Add validate to report records that cannot be read ([#68](https://github.com/datavzrd/readervzrd/issues/68)) ([1ab2e8e](https://github.com/datavzrd/readervzrd/commit/1ab2e8e5bbf514d3c0759d5fc4bad559501e9cba))
+
 ## [0.4.3](https://github.com/datavzrd/readervzrd/compare/v0.4.2...v0.4.3) (2026-09-22)
 
 
