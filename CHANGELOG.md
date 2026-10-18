@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/datavzrd/readervzrd/compare/v0.5.1...v0.6.0) (2026-10-18)
+
+
+### Features
+
+* Let records own their file handle ([#74](https://github.com/datavzrd/readervzrd/issues/74)) ([3754f76](https://github.com/datavzrd/readervzrd/commit/3754f76a45bc666991f0187ba5efc7001ab206b8))
+
 ## [0.5.1](https://github.com/datavzrd/readervzrd/compare/v0.5.0...v0.5.1) (2026-10-18)
 
 
