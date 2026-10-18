@@ -125,17 +125,17 @@ impl FileReader {
     }
 
     /// Returns a reader over the (decompressed) file content, starting at the beginning.
-    fn data_reader(&mut self) -> Result<Box<dyn Read + '_>, FileError> {
-        self.file.seek(SeekFrom::Start(0))?;
+    fn data_reader(&self) -> Result<Box<dyn Read>, FileError> {
+        let file = BufReader::new(File::open(&self.path)?);
         if self.gzipped {
-            Ok(Box::new(GzDecoder::new(&mut self.file)))
+            Ok(Box::new(GzDecoder::new(file)))
         } else {
-            Ok(Box::new(&mut self.file))
+            Ok(Box::new(file))
         }
     }
 
     /// Returns a reader over the JSON content, skipping a UTF-8 byte order mark.
-    fn json_reader(&mut self) -> Result<impl Read + '_, FileError> {
+    fn json_reader(&self) -> Result<impl Read, FileError> {
         let mut reader = BufReader::new(self.data_reader()?);
         if reader.fill_buf()?.starts_with(b"\xEF\xBB\xBF") {
             reader.consume(3);
@@ -221,7 +221,7 @@ impl FileReader {
     ///    println!("{:?}", record);
     /// }
     /// ```
-    pub fn records(&mut self) -> Result<FlexRecordIter<'_>, FileError> {
+    pub fn records(&mut self) -> Result<FlexRecordIter<'static>, FileError> {
         match &self.file_format {
             FileFormat::Csv(delimiter) => {
                 let delimiter = delimiter.to_owned();
@@ -360,9 +360,9 @@ impl FileReader {
     }
 
     fn read_csv_records(
-        &mut self,
+        &self,
         delimiter: &char,
-    ) -> Result<impl Iterator<Item = Vec<String>> + '_, FileError> {
+    ) -> Result<impl Iterator<Item = Vec<String>>, FileError> {
         let reader = csv::ReaderBuilder::new()
             .delimiter(*delimiter as u8)
             .from_reader(self.data_reader()?);
@@ -372,9 +372,7 @@ impl FileReader {
             .map(|record| record.iter().map(|field| field.to_string()).collect()))
     }
 
-    pub fn read_json_records(
-        &mut self,
-    ) -> Result<impl Iterator<Item = Vec<String>> + '_, FileError> {
+    pub fn read_json_records(&mut self) -> Result<impl Iterator<Item = Vec<String>>, FileError> {
         let headers = self.read_json_headers()?;
         let deserializer = Deserializer::from_reader(self.json_reader()?).into_iter::<Value>();
         let iter = deserializer
@@ -389,9 +387,7 @@ impl FileReader {
         Ok(iter)
     }
 
-    fn read_parquet_records(
-        &mut self,
-    ) -> Result<impl Iterator<Item = Vec<String>> + '_, FileError> {
+    fn read_parquet_records(&mut self) -> Result<impl Iterator<Item = Vec<String>>, FileError> {
         self.file.seek(SeekFrom::Start(0))?;
         let file_reader = Arc::new(SerializedFileReader::new(self.file.get_ref().try_clone()?)?);
         let row_group_reader = file_reader.get_row_group(0)?;
@@ -599,6 +595,19 @@ mod tests {
         let records: Vec<Vec<String>> = reader.records().unwrap().collect();
         assert_eq!(headers, vec!["Name", "Age", "Country"]);
         assert_eq!(records.len(), 3);
+    }
+
+    #[test]
+    fn test_records_outlive_reader() {
+        for (path, delimiter) in [
+            ("tests/test.csv", Some(',')),
+            ("tests/test.csv.gz", Some(',')),
+            ("tests/test.json", None),
+            ("tests/test.parquet", None),
+        ] {
+            let records = FileReader::new(path, delimiter).unwrap().records().unwrap();
+            assert_eq!(records.count(), 3, "{path}");
+        }
     }
 
     #[test]
