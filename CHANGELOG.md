@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.1](https://github.com/datavzrd/readervzrd/compare/v0.5.0...v0.5.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* Align JSON records with the headers ([#72](https://github.com/datavzrd/readervzrd/issues/72)) ([7007a39](https://github.com/datavzrd/readervzrd/commit/7007a394ef59fb43b83d7de8aeb62480bc33eac8))
+* Read JSON files with a UTF-8 byte order mark ([#73](https://github.com/datavzrd/readervzrd/issues/73)) ([3d0ea6d](https://github.com/datavzrd/readervzrd/commit/3d0ea6db4d6d5d57b1a62896a14485ff103027a8))
+* Report the physical line of records that cannot be read ([#70](https://github.com/datavzrd/readervzrd/issues/70)) ([0ca3494](https://github.com/datavzrd/readervzrd/commit/0ca34941712bce821f878d075c68b95f158b6c4c))
+
 ## [0.5.0](https://github.com/datavzrd/readervzrd/compare/v0.4.3...v0.5.0) (2026-10-18)
 
 
