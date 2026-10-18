@@ -247,11 +247,26 @@ impl FileReader {
             FileFormat::Csv(delimiter) => {
                 let delimiter = delimiter.to_owned();
                 self.check_if_text_file()?;
-                let mut reader = csv::ReaderBuilder::new()
-                    .delimiter(delimiter as u8)
-                    .from_reader(self.data_reader()?);
-                for record in reader.records() {
-                    record.map_err(|err| csv_record_error(path.clone(), err))?;
+                match self.find_invalid_csv_record(delimiter, &path)? {
+                    Some(InvalidCsvRecord::Utf8 { start }) => {
+                        return Err(FileError::InvalidUtf8 {
+                            line: self.line_at(start)?,
+                            path,
+                        });
+                    }
+                    Some(InvalidCsvRecord::FieldCount {
+                        start,
+                        expected,
+                        found,
+                    }) => {
+                        return Err(FileError::UnequalFieldCount {
+                            line: self.line_at(start)?,
+                            path,
+                            expected,
+                            found,
+                        });
+                    }
+                    None => {}
                 }
             }
             FileFormat::Json => {
@@ -274,6 +289,64 @@ impl FileReader {
             }
         }
         Ok(())
+    }
+
+    fn find_invalid_csv_record(
+        &mut self,
+        delimiter: char,
+        path: &str,
+    ) -> Result<Option<InvalidCsvRecord>, FileError> {
+        let mut reader = csv::ReaderBuilder::new()
+            .delimiter(delimiter as u8)
+            .has_headers(false)
+            .flexible(true)
+            .from_reader(self.data_reader()?);
+        let mut record = csv::ByteRecord::new();
+        let mut header_len = None;
+        while reader
+            .read_byte_record(&mut record)
+            .map_err(|err| FileError::ParseError {
+                path: path.to_string(),
+                message: err.to_string(),
+            })?
+        {
+            let start = record.position().map_or(0, |pos| pos.byte());
+            let is_utf8 = record
+                .iter()
+                .all(|field| std::str::from_utf8(field).is_ok());
+            let found = record.len() as u64;
+            match header_len {
+                None if !is_utf8 => return Err(FileError::BinaryFile(path.to_string())),
+                None => header_len = Some(found),
+                Some(_) if !is_utf8 => return Ok(Some(InvalidCsvRecord::Utf8 { start })),
+                Some(expected) if found != expected => {
+                    return Ok(Some(InvalidCsvRecord::FieldCount {
+                        start,
+                        expected,
+                        found,
+                    }))
+                }
+                Some(_) => {}
+            }
+        }
+        Ok(None)
+    }
+
+    /// Returns the line of the record starting at the given byte, skipping preceding blank lines.
+    fn line_at(&mut self, byte: u64) -> Result<u64, FileError> {
+        let mut line = 1;
+        let mut previous = 0;
+        for (position, value) in BufReader::new(self.data_reader()?).bytes().enumerate() {
+            let value = value?;
+            if position as u64 >= byte && value != b'\n' && value != b'\r' {
+                break;
+            }
+            if value == b'\r' || (value == b'\n' && previous != b'\r') {
+                line += 1;
+            }
+            previous = value;
+        }
+        Ok(line)
     }
 
     fn read_csv_records(
@@ -381,28 +454,15 @@ impl Iterator for FlexRecordIter<'_> {
     }
 }
 
-fn csv_record_error(path: String, err: csv::Error) -> FileError {
-    let line = |pos: &Option<csv::Position>| pos.as_ref().map_or(0, |pos| pos.line());
-    match err.kind() {
-        csv::ErrorKind::Utf8 { pos, .. } => FileError::InvalidUtf8 {
-            path,
-            line: line(pos),
-        },
-        csv::ErrorKind::UnequalLengths {
-            pos,
-            expected_len,
-            len,
-        } => FileError::UnequalFieldCount {
-            path,
-            line: line(pos),
-            expected: *expected_len,
-            found: *len,
-        },
-        _ => FileError::ParseError {
-            path,
-            message: err.to_string(),
-        },
-    }
+enum InvalidCsvRecord {
+    Utf8 {
+        start: u64,
+    },
+    FieldCount {
+        start: u64,
+        expected: u64,
+        found: u64,
+    },
 }
 
 fn flatten_json_record(value: Value) -> Vec<String> {
@@ -834,6 +894,56 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn test_validate_reports_physical_line_numbers() {
+        for (name, content, line) in [
+            ("first_row", &b"Name,Age\nM\xfcller,25\nJohn,30\n"[..], 2),
+            ("blank_line", b"Name,Age\nJohn,30\n\nAlice,25,UK\n", 4),
+            (
+                "crlf_blank_line",
+                b"Name,Age\r\nJohn,30\r\n\r\nAlice,25,UK\r\n",
+                4,
+            ),
+            (
+                "quoted_newline",
+                b"Name,Age\n\"John\nDoe\",30\nAlice,25,UK\n",
+                4,
+            ),
+        ] {
+            let path = format!("tests/line_{name}_test.csv");
+            std::fs::write(&path, content).unwrap();
+
+            let mut reader = FileReader::new(&path, Some(',')).unwrap();
+            let result = reader.validate();
+
+            std::fs::remove_file(&path).unwrap_or(());
+
+            match result {
+                Err(FileError::InvalidUtf8 { line: found, .. })
+                | Err(FileError::UnequalFieldCount { line: found, .. }) => {
+                    assert_eq!(found, line, "{name}")
+                }
+                other => panic!("{name}: unexpected result {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_validate_invalid_utf8_header() {
+        std::fs::write(
+            "tests/invalid_utf8_header_test.csv",
+            b"Gr\xf6\xdfe,Age\nJohn,30\n",
+        )
+        .unwrap();
+
+        let mut reader = FileReader::new("tests/invalid_utf8_header_test.csv", Some(',')).unwrap();
+        let result = reader.validate();
+
+        std::fs::remove_file("tests/invalid_utf8_header_test.csv").unwrap_or(());
+
+        assert!(matches!(result, Err(FileError::BinaryFile(_))));
     }
 
     #[test]
