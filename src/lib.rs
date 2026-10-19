@@ -4,7 +4,7 @@ use parquet::errors::ParquetError;
 use parquet::file::reader::{FileReader as ParquetFileReader, SerializedFileReader};
 use parquet::record::reader::RowIter;
 use serde_json::{Deserializer, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
@@ -298,6 +298,14 @@ impl FileReader {
                 }
             }
         }
+        let mut columns = HashSet::new();
+        if let Some(column) = self
+            .headers()?
+            .into_iter()
+            .find(|c| !columns.insert(c.clone()))
+        {
+            return Err(FileError::DuplicateColumn { path, column });
+        }
         Ok(())
     }
 
@@ -555,6 +563,8 @@ pub enum FileError {
         expected: u64,
         found: u64,
     },
+    #[error("Column {column:?} appears more than once in the header of {path}, please give each column a unique name")]
+    DuplicateColumn { path: String, column: String },
     #[error("Failed to parse {path}: {message}")]
     ParseError { path: String, message: String },
     #[error("IO error: {0}")]
@@ -932,6 +942,25 @@ mod tests {
             let mut reader = FileReader::new(path, delimiter).unwrap();
             assert!(reader.validate().is_ok(), "{path} should be valid");
         }
+    }
+
+    #[test]
+    fn test_validate_duplicate_column() {
+        std::fs::write(
+            "tests/duplicate_column_test.csv",
+            "Name,Age,Name\nJohn,30,Doe\n",
+        )
+        .unwrap();
+
+        let mut reader = FileReader::new("tests/duplicate_column_test.csv", Some(',')).unwrap();
+        let result = reader.validate();
+
+        std::fs::remove_file("tests/duplicate_column_test.csv").unwrap_or(());
+
+        assert!(matches!(
+            result,
+            Err(FileError::DuplicateColumn { column, .. }) if column == "Name"
+        ));
     }
 
     #[test]
