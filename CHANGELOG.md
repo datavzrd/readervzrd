@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/datavzrd/readervzrd/compare/v0.6.0...v0.7.0) (2026-10-19)
+
+
+### Features
+
+* Report duplicate column names when validating ([#77](https://github.com/datavzrd/readervzrd/issues/77)) ([e7ea638](https://github.com/datavzrd/readervzrd/commit/e7ea6388bbdf722429a04d0318b0fdd77d12d4b1))
+
 ## [0.6.0](https://github.com/datavzrd/readervzrd/compare/v0.5.1...v0.6.0) (2026-10-18)
 
 
