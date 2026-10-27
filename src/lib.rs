@@ -830,10 +830,7 @@ mod tests {
             .expect("Failed to detect file format");
 
         assert!(!gzipped);
-        match format {
-            FileFormat::Parquet => assert!(true),
-            _ => panic!("Expected Parquet format"),
-        }
+        assert!(matches!(format, FileFormat::Parquet));
     }
 
     #[test]
